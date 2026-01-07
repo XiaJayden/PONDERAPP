@@ -1,57 +1,82 @@
-import React from 'react';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, Tabs } from 'expo-router';
-import { Pressable } from 'react-native';
+import React, { useEffect } from 'react';
+import { Tabs } from 'expo-router';
 
-import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
-
-// You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
-function TabBarIcon(props: {
-  name: React.ComponentProps<typeof FontAwesome>['name'];
-  color: string;
-}) {
-  return <FontAwesome size={28} style={{ marginBottom: -3 }} {...props} />;
-}
+import { router } from 'expo-router';
+import { useAuth } from '@/providers/auth-provider';
+import { useProfile } from '@/hooks/useProfile';
+import { BottomNav } from '@/components/navigation/bottom-nav';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const { user, isLoading: isAuthLoading } = useAuth();
+  const { profile, isLoading: isProfileLoading } = useProfile();
+
+  useEffect(() => {
+    if (isAuthLoading) return;
+    if (!user) {
+      if (__DEV__) console.log("[tabs-layout] no user → redirecting to login");
+      router.replace("/(auth)/login");
+      return;
+    }
+
+    if (isProfileLoading) return;
+
+    const needsOnboarding =
+      !profile ||
+      !profile.onboarding_complete ||
+      !profile.first_name ||
+      !profile.username ||
+      !profile.birthday;
+
+    if (needsOnboarding) {
+      if (__DEV__) console.log("[tabs-layout] needs onboarding → redirecting", { hasProfile: !!profile });
+      router.replace("/(auth)/onboarding");
+    }
+  }, [isAuthLoading, isProfileLoading, profile, user]);
 
   return (
     <Tabs
+      tabBar={(props) => <BottomNav {...props} />}
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        // Disable the static render of the header on web
-        // to prevent a hydration error in React Navigation v6.
-        headerShown: useClientOnlyValue(false, true),
+        headerShown: false,
+        // We render our own tab bar.
+        tabBarStyle: { display: "none" },
       }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Tab One',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
-          headerRight: () => (
-            <Link href="/modal" asChild>
-              <Pressable>
-                {({ pressed }) => (
-                  <FontAwesome
-                    name="info-circle"
-                    size={25}
-                    color={Colors[colorScheme ?? 'light'].text}
-                    style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
-                  />
-                )}
-              </Pressable>
-            </Link>
-          ),
+          title: 'Feed',
         }}
       />
       <Tabs.Screen
-        name="two"
+        name="friends"
         options={{
-          title: 'Tab Two',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
+          title: 'Friends',
+        }}
+      />
+
+      <Tabs.Screen
+        name="create"
+        options={{
+          title: "Create",
+          // Hide default tab button; we render the floating center button ourselves.
+          tabBarButton: () => null,
+        }}
+      />
+
+      <Tabs.Screen
+        name="gallery"
+        options={{
+          title: "Gallery",
+        }}
+      />
+
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
         }}
       />
     </Tabs>
