@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 
-import { PromptPopup, type PromptPopupPrompt } from "../../components/prompts/prompt-popup";
+import { PromptPopup } from "../../components/prompts/prompt-popup.web";
+import type { PromptPopupPrompt } from "../../components/prompts/prompt-popup";
 
 type DailyPromptLike = {
   id: string;
