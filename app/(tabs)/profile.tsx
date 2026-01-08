@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ExpandedPostModal } from "@/components/posts/expanded-post-modal";
 import { YimPost, type Post } from "@/components/posts/yim-post";
+import { DailyFeedback } from "@/components/feedback/daily-feedback";
 import { useFriends } from "@/hooks/useFriends";
 import { useProfile } from "@/hooks/useProfile";
 import { useUserPosts } from "@/hooks/useYimFeed";
@@ -207,6 +208,11 @@ export default function ProfileScreen() {
           {!!userPosts.errorMessage ? (
             <Text className="mt-3 font-mono text-xs text-destructive">{userPosts.errorMessage}</Text>
           ) : null}
+        </View>
+
+        {/* Alpha feedback */}
+        <View className="mt-10">
+          <DailyFeedback />
         </View>
       </ScrollView>
     </SafeAreaView>

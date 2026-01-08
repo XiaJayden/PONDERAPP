@@ -39,3 +39,11 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# docs
+*.md
+
+/yim app/
+
+.env*
+.gitignore

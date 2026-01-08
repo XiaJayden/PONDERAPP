@@ -11,6 +11,7 @@ export default function GalleryScreen() {
   const { posts, isLoading } = useGallery();
   const [expandedPost, setExpandedPost] = useState<Post | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [itemWidth, setItemWidth] = useState(0);
 
   const activePost = useMemo(() => posts[activeIndex] ?? null, [activeIndex, posts]);
 
@@ -44,13 +45,15 @@ export default function GalleryScreen() {
               horizontal
               pagingEnabled
               showsHorizontalScrollIndicator={false}
+              snapToInterval={itemWidth > 0 ? itemWidth : undefined}
+              decelerationRate="fast"
               onMomentumScrollEnd={(e) => {
                 const width = e.nativeEvent.layoutMeasurement.width;
                 const index = Math.round(e.nativeEvent.contentOffset.x / width);
                 setActiveIndex(index);
               }}
               renderItem={({ item }) => (
-                <View style={{ width: "100%" }} className="pr-4">
+                <View style={{ width: itemWidth || "100%" }}>
                   <PostHeader post={item} />
                   <Pressable onPress={() => setExpandedPost(item)} accessibilityRole="button">
                     <YimPost post={item} previewMode />
@@ -58,6 +61,17 @@ export default function GalleryScreen() {
                   <PostFooterActions />
                 </View>
               )}
+              onLayout={(e) => {
+                const width = e.nativeEvent.layout.width;
+                if (width > 0 && width !== itemWidth) {
+                  setItemWidth(width);
+                }
+              }}
+              getItemLayout={itemWidth > 0 ? (_, index) => ({
+                length: itemWidth,
+                offset: itemWidth * index,
+                index,
+              }) : undefined}
             />
 
             {/* Plaque */}

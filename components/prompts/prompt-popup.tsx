@@ -1,8 +1,14 @@
 import React from "react";
-import { Modal, Pressable, Text, View } from "react-native";
-import { X } from "lucide-react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
-import type { DailyPrompt } from "@/hooks/useDailyPrompt";
+export type PromptPopupPrompt = {
+  id: string;
+  prompt_text: string;
+  explanation_text: string | null;
+  prompt_date: string; // YYYY-MM-DD
+  theme: string | null;
+  display_order: number | null;
+};
 
 /**
  * Full-screen prompt popup.
@@ -16,53 +22,45 @@ export function PromptPopup({
   onRespond,
 }: {
   isVisible: boolean;
-  prompt: DailyPrompt;
+  prompt: PromptPopupPrompt;
   onClose: () => void;
   onRespond: () => void;
 }) {
   return (
     <Modal visible={isVisible} transparent animationType="fade" onRequestClose={onClose}>
-      <View className="flex-1 bg-black/70 px-4">
-        {/* Taller, bottom-sheet style container */}
-        <View className="flex-1 justify-end pb-10">
-          <View className="min-h-[420px] rounded-3xl border border-muted bg-card p-6">
-            <View className="flex-row items-center justify-between">
-              <Text className="font-mono text-xs uppercase tracking-wider text-primary">Today’s PONDR</Text>
-              <Pressable
-                onPress={onClose}
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-                className="h-10 w-10 items-center justify-center"
-                hitSlop={10}
-              >
-                <X color="hsl(0 0% 55%)" size={18} />
-              </Pressable>
-            </View>
+      <View style={styles.backdrop}>
+        <View style={styles.backdropPad}>
+          {/* Taller, bottom-sheet style container */}
+          <View style={styles.sheetWrap}>
+            <View style={styles.card}>
+              <View style={styles.headerRow}>
+                <Text style={styles.kicker}>Today’s PONDR</Text>
+                <Pressable
+                  onPress={onClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  style={styles.closeButton}
+                  hitSlop={10}
+                >
+                  <Text style={styles.closeIcon}>×</Text>
+                </Pressable>
+              </View>
 
-            {/* Intro / context */}
-            {!!prompt.explanation_text ? (
-              <Text className="mt-5 font-body text-base leading-relaxed text-muted-foreground">
-                {prompt.explanation_text}
-              </Text>
-            ) : (
-              <Text className="mt-5 font-body text-base leading-relaxed text-muted-foreground">
-                Take a moment. Read slowly. Then answer honestly.
-              </Text>
-            )}
+              {/* Intro / context */}
+              {!!prompt.explanation_text ? (
+                <Text style={styles.explainer}>{prompt.explanation_text}</Text>
+              ) : (
+                <Text style={styles.explainer}>Take a moment. Read slowly. Then answer honestly.</Text>
+              )}
 
-            {/* Punchline question anchored toward the bottom */}
-            <View className="mt-6 flex-1 justify-end">
-              <Text className="font-playfair text-3xl leading-tight text-foreground">
-                {prompt.prompt_text}
-              </Text>
+              {/* Punchline question anchored toward the bottom */}
+              <View style={styles.questionWrap}>
+                <Text style={styles.question}>{prompt.prompt_text}</Text>
 
-              <Pressable
-                onPress={onRespond}
-                accessibilityRole="button"
-                className="mt-4 items-center justify-center rounded-xl bg-primary px-4 py-3"
-              >
-                <Text className="font-mono text-xs uppercase tracking-wider text-background">Respond</Text>
-              </Pressable>
+                <Pressable onPress={onRespond} accessibilityRole="button" style={styles.respondButton}>
+                  <Text style={styles.respondText}>Respond</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </View>
@@ -70,6 +68,42 @@ export function PromptPopup({
     </Modal>
   );
 }
+
+const styles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.70)" },
+  backdropPad: { flex: 1, paddingHorizontal: 16 },
+  sheetWrap: { flex: 1, justifyContent: "flex-end", paddingBottom: 40 },
+  card: {
+    minHeight: 420,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(18,18,18,0.96)",
+    padding: 24,
+  },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  kicker: {
+    fontSize: 12,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.80)",
+  },
+  closeButton: { height: 40, width: 40, alignItems: "center", justifyContent: "center" },
+  closeIcon: { fontSize: 22, lineHeight: 22, color: "rgba(255,255,255,0.55)" },
+  explainer: { marginTop: 20, fontSize: 16, lineHeight: 24, color: "rgba(255,255,255,0.65)" },
+  questionWrap: { marginTop: 24, flex: 1, justifyContent: "flex-end" },
+  question: { fontSize: 30, lineHeight: 36, color: "rgba(255,255,255,0.95)" },
+  respondButton: {
+    marginTop: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  respondText: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", color: "rgba(0,0,0,0.90)" },
+});
 
 
 

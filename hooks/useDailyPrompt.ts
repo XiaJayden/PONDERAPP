@@ -32,6 +32,13 @@ interface UseDailyPromptResult {
   refetch: () => Promise<void>;
 }
 
+type DevPromptOverride = {
+  force_open: boolean;
+  force_closed: boolean;
+  expires_at: string | null;
+  created_at: string;
+} | null;
+
 function getPromptAvailableTime(promptDate: string) {
   return getPacificTimeForPromptDate(promptDate, 6, 0);
 }
@@ -85,6 +92,7 @@ export function useDailyPrompt(): UseDailyPromptResult {
   const [hasResponded, setHasResponded] = useState(false);
   const [timeUntilDeadline, setTimeUntilDeadline] = useState<number | null>(null);
   const [timeUntilRelease, setTimeUntilRelease] = useState<number | null>(null);
+  const [devOverride, setDevOverride] = useState<DevPromptOverride>(null);
 
   async function refetch() {
     setIsLoading(true);
@@ -137,12 +145,41 @@ export function useDailyPrompt(): UseDailyPromptResult {
       if (user) setHasResponded(await didUserRespondToPrompt({ userId: user.id, promptId: mapped.id }));
       else setHasResponded(false);
 
+      // Dev override (best-effort; if table/policy doesn't exist, ignore).
+      if (user) {
+        const { data: overrideData, error: overrideError } = await supabase
+          .from("dev_prompt_overrides")
+          .select("force_open,force_closed,expires_at,created_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (overrideError) {
+          if (__DEV__) console.warn("[useDailyPrompt] dev override fetch failed", overrideError);
+          setDevOverride(null);
+        } else {
+          setDevOverride(
+            overrideData
+              ? {
+                  force_open: !!(overrideData as any).force_open,
+                  force_closed: !!(overrideData as any).force_closed,
+                  expires_at: (overrideData as any).expires_at ?? null,
+                  created_at: String((overrideData as any).created_at),
+                }
+              : null
+          );
+        }
+      } else {
+        setDevOverride(null);
+      }
+
       // Timers are computed in the interval effect below.
     } catch (error) {
       console.error("[useDailyPrompt] refetch failed", error);
       setErrorMessage(error instanceof Error ? error.message : "Failed to fetch daily prompt");
       setPrompt(null);
       setHasResponded(false);
+      setDevOverride(null);
     } finally {
       setIsLoading(false);
     }
@@ -168,6 +205,11 @@ export function useDailyPrompt(): UseDailyPromptResult {
       if (isCancelled) return;
       const now = new Date();
 
+      const isDevOverrideActive =
+        !!devOverride &&
+        (devOverride.expires_at === null || new Date(devOverride.expires_at).getTime() > now.getTime()) &&
+        (devOverride.force_open || devOverride.force_closed);
+
       const availableAt = getPromptAvailableTime(prompt.prompt_date);
       const closesAt = getResponseWindowCloseTime(prompt.prompt_date);
       const releasesAt = getPostReleaseTime(prompt.prompt_date);
@@ -176,6 +218,12 @@ export function useDailyPrompt(): UseDailyPromptResult {
       if (!user) {
         setTimeUntilDeadline(null);
       } else {
+        if (isDevOverrideActive && devOverride?.force_closed) {
+          setTimeUntilDeadline(null);
+        } else if (isDevOverrideActive && devOverride?.force_open) {
+          // For dev testing, treat deadline as 30 minutes from now.
+          setTimeUntilDeadline(30 * 60 * 1000);
+        } else {
         const openTime = await getUserPromptOpenTime({
           userId: user.id,
           promptId: prompt.id,
@@ -189,6 +237,7 @@ export function useDailyPrompt(): UseDailyPromptResult {
           const deadline = userThirtyMinDeadline.getTime() < closesAt.getTime() ? userThirtyMinDeadline : closesAt;
           const untilDeadline = getTimeUntil(deadline, now);
           setTimeUntilDeadline(untilDeadline);
+        }
         }
       }
 
@@ -205,7 +254,7 @@ export function useDailyPrompt(): UseDailyPromptResult {
       isCancelled = true;
       clearInterval(id);
     };
-  }, [prompt?.id, prompt?.prompt_date, user?.id]);
+  }, [prompt?.id, prompt?.prompt_date, user?.id, devOverride]);
 
   const computed = useMemo(() => {
     const now = new Date();
@@ -217,6 +266,11 @@ export function useDailyPrompt(): UseDailyPromptResult {
       };
     }
 
+    const isDevOverrideActive =
+      !!devOverride &&
+      (devOverride.expires_at === null || new Date(devOverride.expires_at).getTime() > now.getTime()) &&
+      (devOverride.force_open || devOverride.force_closed);
+
     const availableAt = getPromptAvailableTime(prompt.prompt_date);
     const closesAt = getResponseWindowCloseTime(prompt.prompt_date);
 
@@ -224,10 +278,19 @@ export function useDailyPrompt(): UseDailyPromptResult {
     const isResponseWindowOpen = isBefore(now, closesAt);
 
     // Being “in” response window requires that user opened prompt and a deadline exists.
-    const isInResponseWindow = !!user && isPromptAvailable && isResponseWindowOpen && timeUntilDeadline !== null;
+    const baseIsInWindow = !!user && isPromptAvailable && isResponseWindowOpen && timeUntilDeadline !== null;
 
-    return { isPromptAvailable, isResponseWindowOpen, isInResponseWindow };
-  }, [prompt, timeUntilDeadline, user]);
+    if (isDevOverrideActive && devOverride?.force_closed) {
+      return { isPromptAvailable, isResponseWindowOpen: false, isInResponseWindow: false };
+    }
+
+    if (isDevOverrideActive && devOverride?.force_open) {
+      // Force open for testing (even if outside normal window).
+      return { isPromptAvailable: true, isResponseWindowOpen: true, isInResponseWindow: !!user };
+    }
+
+    return { isPromptAvailable, isResponseWindowOpen, isInResponseWindow: baseIsInWindow };
+  }, [prompt, timeUntilDeadline, user, devOverride]);
 
   // Date key for “popup shown today” flags.
   const todayPacific = useMemo(() => getTodayPacificIsoDate(), []);
@@ -240,6 +303,7 @@ export function useDailyPrompt(): UseDailyPromptResult {
       promptDate: prompt.prompt_date,
       todayPacific,
       hasResponded,
+      devOverride,
       ...computed,
     });
   }
