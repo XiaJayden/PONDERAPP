@@ -5,10 +5,7 @@ const nextConfig = {
     externalDir: true,
   },
   transpilePackages: [
-    // Shared RN code (PromptPopup) pulls these in.
     "react-native-web",
-    "lucide-react-native",
-    "nativewind",
   ],
   webpack: (config) => {
     // Make RN imports work in Next by mapping react-native -> react-native-web.
