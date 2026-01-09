@@ -2,7 +2,15 @@
 import React from "react";
 import { Pressable, Text, View } from "react-native-web";
 
-import type { PromptPopupPrompt } from "../../components/prompts/prompt-popup";
+// Local type definition (same as external prompt-popup.tsx) to avoid type-checking external RN files
+export type PromptPopupPrompt = {
+  id: string;
+  prompt_text: string;
+  explanation_text: string | null;
+  prompt_date: string; // YYYY-MM-DD
+  theme: string | null;
+  display_order: number | null;
+};
 
 /**
  * Web-only version used by the dev dashboard preview.
