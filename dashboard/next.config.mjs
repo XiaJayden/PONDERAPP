@@ -4,6 +4,7 @@ import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const { existsSync } = require("fs");
 const { join } = require("path");
+const webpack = require("webpack");
 function logDebug(data) {
   const payload = JSON.stringify({...data, timestamp: Date.now(), sessionId: "debug-session"});
   fetch('http://127.0.0.1:7243/ingest/aff388a3-96fd-4fa2-9425-e1475bf41c13',{method:'POST',headers:{'Content-Type':'application/json'},body:payload}).catch(()=>{});
@@ -15,6 +16,11 @@ const nextConfig = {
   experimental: {
     // Allow importing shared code from the parent repo (we reuse the real PromptPopup).
     externalDir: true,
+  },
+  typescript: {
+    // Skip type-checking during build (we'll rely on IDE checking and CI)
+    // This avoids issues with external .tsx files that use react-native
+    ignoreBuildErrors: false,
   },
   transpilePackages: [
     "react-native-web",
@@ -43,8 +49,20 @@ const nextConfig = {
       ...config.resolve.modules.filter(m => !m.includes("node_modules") || m !== "node_modules"),
     ];
     
+    // Prioritize .web.tsx and .web.ts extensions for React Native Web compatibility
+    if (!config.resolve.extensions) {
+      config.resolve.extensions = [".js", ".jsx", ".json"];
+    }
+    config.resolve.extensions = [
+      ".web.tsx",
+      ".web.ts",
+      ".web.jsx",
+      ".web.js",
+      ...config.resolve.extensions.filter(ext => !ext.includes(".web")),
+    ];
+    
     // #region agent log
-    logDebug({runId: "build-2", hypothesisId: "E", location: "next.config.mjs:webpack", message: "Resolve modules updated", data: {updated: config.resolve.modules.slice(0, 3)}});
+    logDebug({runId: "build-3", hypothesisId: "F", location: "next.config.mjs:webpack", message: "Resolve config updated", data: {modules: config.resolve.modules.slice(0, 3), extensions: config.resolve.extensions.slice(0, 6)}});
     // #endregion
     
     // Make RN imports work in Next by mapping react-native -> react-native-web.
@@ -54,7 +72,7 @@ const nextConfig = {
     };
     
     // #region agent log
-    logDebug({runId: "build-2", hypothesisId: "E", location: "next.config.mjs:webpack", message: "After setting alias", data: {hasReactNativeAlias: config.resolve.alias["react-native$"] === "react-native-web"}});
+    logDebug({runId: "build-4", hypothesisId: "G", location: "next.config.mjs:webpack", message: "After setting alias", data: {hasReactNativeAlias: config.resolve.alias["react-native$"] === "react-native-web"}});
     // #endregion
     
     return config;
