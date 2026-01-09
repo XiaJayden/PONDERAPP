@@ -34,7 +34,7 @@ export function PromptPopup({
         <div style={styles.sheetWrap}>
           <div style={styles.card}>
             <div style={styles.headerRow}>
-              <div style={styles.kicker}>Today's PONDR</div>
+              <div style={styles.kicker}>Today&apos;s PONDR</div>
               <button
                 onClick={onClose}
                 style={styles.closeButton}
