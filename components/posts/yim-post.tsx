@@ -1,6 +1,6 @@
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useMemo } from "react";
-import { ImageBackground, Pressable, Text, View, type ImageSourcePropType } from "react-native";
+import { ImageBackground, Pressable, Text, TextInput, View, type ImageSourcePropType } from "react-native";
 
 export type FontStyle = "bebas" | "playfair" | "archivo" | "marker" | "caveat" | "canela";
 export type FontColor = "black" | "white";
@@ -47,6 +47,11 @@ interface YimPostProps {
   previewMode?: boolean;
   hideFooter?: boolean;
   onPress?: () => void;
+  quotePlaceholder?: string;
+  editableQuote?: boolean;
+  onChangeQuote?: (value: string) => void;
+  maxQuoteLength?: number;
+  borderRadiusOverride?: number;
 }
 
 const IMAGE_BACKGROUNDS: Record<Exclude<BackgroundType, "photo">, ImageSourcePropType | null> = {
@@ -98,15 +103,28 @@ function getTextColor(fontColor: FontColor) {
   return fontColor === "black" ? "hsl(0 0% 4%)" : "hsl(60 9% 98%)";
 }
 
-function getFontSize(fontSize: FontSize, size: "sm" | "md" | "lg") {
-  // Approximate web sizing (not pixel-identical, but keeps hierarchy).
-  const bySize = {
-    sm: { small: 12, medium: 14, large: 16, xlarge: 16 },
-    md: { small: 16, medium: 22, large: 28, xlarge: 28 },
-    lg: { small: 18, medium: 26, large: 32, xlarge: 32 },
-  } as const;
+function getAutoFontSize(textLength: number, size: "sm" | "md" | "lg") {
+  const len = Math.max(0, textLength);
 
-  return bySize[size][fontSize];
+  if (size === "sm") {
+    if (len <= 40) return 16;
+    if (len <= 80) return 14;
+    if (len <= 140) return 12;
+    return 10;
+  }
+
+  if (size === "lg") {
+    if (len <= 60) return 32;
+    if (len <= 120) return 26;
+    if (len <= 200) return 22;
+    return 18;
+  }
+
+  // size === "md"
+  if (len <= 60) return 28;
+  if (len <= 120) return 22;
+  if (len <= 200) return 18;
+  return 16;
 }
 
 export function YimPost({
@@ -115,11 +133,18 @@ export function YimPost({
   previewMode = false,
   hideFooter,
   onPress,
+  quotePlaceholder,
+  editableQuote,
+  onChangeQuote,
+  maxQuoteLength,
+  borderRadiusOverride,
 }: YimPostProps) {
   const fontFamily = getFontFamily(post.font ?? "bebas");
   const textColor = getTextColor(post.fontColor ?? "white");
-  const quoteSize = getFontSize(post.fontSize ?? "medium", size);
   const shouldHideFooter = hideFooter ?? previewMode;
+  const isQuoteEmpty = !post.quote?.trim?.();
+  const displayQuote = isQuoteEmpty ? (quotePlaceholder ?? "") : post.quote;
+  const isPlaceholder = isQuoteEmpty && !!quotePlaceholder;
 
   const background = useMemo(() => {
     if (post.background === "photo" && post.photoBackgroundUrl) {
@@ -133,8 +158,11 @@ export function YimPost({
     return { kind: "gradient" as const, colors: gradient ?? GRADIENTS.dark };
   }, [post.background, post.photoBackgroundUrl]);
 
+  const effectiveQuote = displayQuote ?? "";
+  const quoteSize = getAutoFontSize(effectiveQuote.length, size);
+
   const cardPadding = size === "sm" ? 12 : size === "lg" ? 24 : 20;
-  const borderRadius = previewMode ? 16 : 51; // signature radius for posts
+  const borderRadius = borderRadiusOverride ?? (previewMode ? 16 : 51); // signature radius for posts
 
   const content = (
     <View
@@ -181,18 +209,41 @@ export function YimPost({
             />
           ) : null}
 
-          <Text
-            style={{
-              zIndex: 1,
-              fontFamily,
-              fontSize: quoteSize,
-              lineHeight: Math.round(quoteSize * 1.15),
-              color: textColor,
-              textAlign: "center",
-            }}
-          >
-            {post.quote}
-          </Text>
+          {editableQuote && onChangeQuote ? (
+            <TextInput
+              value={post.quote}
+              onChangeText={(t) => {
+                const next = maxQuoteLength ? t.slice(0, maxQuoteLength) : t;
+                onChangeQuote(next);
+              }}
+              placeholder={quotePlaceholder}
+              placeholderTextColor="rgba(255,255,255,0.65)"
+              multiline
+              textAlign="center"
+              style={{
+                zIndex: 1,
+                fontFamily,
+                fontSize: quoteSize,
+                lineHeight: Math.round(quoteSize * 1.15),
+                color: textColor,
+                opacity: isPlaceholder ? 0.55 : 1,
+              }}
+            />
+          ) : (
+            <Text
+              style={{
+                zIndex: 1,
+                fontFamily,
+                fontSize: quoteSize,
+                lineHeight: Math.round(quoteSize * 1.15),
+                color: textColor,
+                textAlign: "center",
+                opacity: isPlaceholder ? 0.55 : 1,
+              }}
+            >
+              {displayQuote}
+            </Text>
+          )}
         </View>
 
         {!shouldHideFooter ? (

@@ -1,15 +1,6 @@
 import * as ImagePicker from "expo-image-picker";
 import React, { useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import { YimPost, type BackgroundType, type FontColor, type FontSize, type FontStyle, type Post, type TextHighlight } from "@/components/posts/yim-post";
 import { supabase } from "@/lib/supabase";
@@ -34,7 +25,7 @@ interface CreatePostProps {
   onPosted?: (created: Post) => void;
 }
 
-const POST_MAX_CHARS = 500;
+const POST_MAX_CHARS = 120;
 
 const FONT_OPTIONS: Array<{ key: FontStyle; label: string }> = [
   { key: "playfair", label: "Elegant" },
@@ -95,7 +86,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
   const [background, setBackground] = useState<BackgroundType>("dark");
   const [font, setFont] = useState<FontStyle>("playfair");
   const [fontColor, setFontColor] = useState<FontColor>("white");
-  const [fontSize, setFontSize] = useState<FontSize>("large");
+  const [fontSize] = useState<FontSize>("large");
   const [textHighlight, setTextHighlight] = useState<TextHighlight | null>(null);
 
   // Local preview URI for photo background. We upload on submit.
@@ -114,7 +105,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
   const previewPost: Post = useMemo(
     () => ({
       id: "preview",
-      quote: quote.trim() ? quote : "why i am",
+      quote,
       attribution: "",
       date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       background: photoUri ? "photo" : background,
@@ -158,7 +149,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
       return;
     }
     if (!isValid) {
-      setErrorMessage("Your thesis must be 1–500 characters.");
+      setErrorMessage("Your caption must be 1–120 characters.");
       return;
     }
     if (!canCreate) {
@@ -204,51 +195,46 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-background">
       <ScrollView className="flex-1" contentContainerClassName="px-4 pt-8 pb-24">
         {step === "content" ? (
-          <View className="gap-6">
+          <View className="flex-1 gap-6">
             {promptText ? (
               <View className="gap-3">
                 <Text className="font-mono text-xs uppercase tracking-wider text-primary">Today’s PONDR</Text>
                 <Text className="font-playfair text-3xl leading-tight text-foreground">{promptText}</Text>
-
-                <TextInput
-                  value={expandedText}
-                  onChangeText={setExpandedText}
-                  placeholder="What do you think?"
-                  placeholderTextColor="hsl(0 0% 55%)"
-                  multiline
-                  className="h-64 rounded-2xl border border-muted bg-card p-4 font-body text-base text-foreground"
-                />
               </View>
             ) : null}
 
-            <View className="gap-2">
-              <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Your Thesis</Text>
+            <View className="flex-1">
               <TextInput
-                value={quote}
-                onChangeText={(t) => setQuote(t.slice(0, POST_MAX_CHARS))}
-                placeholder="Your thought in a sentence."
+                value={expandedText}
+                onChangeText={setExpandedText}
+                placeholder="What do you think?"
                 placeholderTextColor="hsl(0 0% 55%)"
                 multiline
-                className="min-h-[90px] rounded-2xl border border-muted bg-card p-4 font-mono text-base text-foreground"
+                textAlignVertical="top"
+                className="flex-1 p-4 text-base text-foreground"
+                style={{ fontFamily: "SpaceMono", backgroundColor: "transparent" }}
               />
-              <Text className="text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                {quote.length}/{POST_MAX_CHARS}
-              </Text>
             </View>
-
-            {!!errorMessage ? <Text className="font-mono text-xs text-destructive">{errorMessage}</Text> : null}
 
             {!canCreate && promptId ? (
               <Text className="text-center font-mono text-xs text-muted-foreground">
                 Prompt posting is closed (or not yet opened).
               </Text>
             ) : null}
+
+            {!!errorMessage ? <Text className="font-mono text-xs text-destructive">{errorMessage}</Text> : null}
           </View>
         ) : (
           <View className="gap-6">
             <Text className="font-display text-3xl text-foreground">Style</Text>
 
-            <YimPost post={previewPost} />
+            <YimPost
+              post={previewPost}
+              editableQuote
+              onChangeQuote={(t) => setQuote(t.slice(0, POST_MAX_CHARS))}
+              quotePlaceholder="Enter a caption here"
+              maxQuoteLength={POST_MAX_CHARS}
+            />
 
             {/* Background */}
             <View className="gap-3">
@@ -278,6 +264,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
                         size="sm"
                         previewMode
                         hideFooter
+                        borderRadiusOverride={12}
                       />
                     </View>
                   </Pressable>
@@ -308,6 +295,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
                         size="sm"
                         previewMode
                         hideFooter
+                        borderRadiusOverride={12}
                       />
                     </View>
                   </Pressable>
@@ -370,27 +358,6 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
               </View>
             </View>
 
-            {/* Font size */}
-            <View className="gap-3">
-              <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Font Size</Text>
-              <View className="flex-row gap-2">
-                {(["small", "medium", "large"] as FontSize[]).map((s) => (
-                  <Pressable
-                    key={s}
-                    onPress={() => setFontSize(s)}
-                    className={[
-                      "rounded-xl border px-3 py-2",
-                      fontSize === s ? "border-primary bg-primary" : "border-muted bg-card",
-                    ].join(" ")}
-                  >
-                    <Text className={fontSize === s ? "font-mono text-xs text-background" : "font-mono text-xs text-foreground"}>
-                      {s}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-
             {/* Highlight */}
             <View className="gap-3">
               <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Text Highlight</Text>
@@ -433,17 +400,13 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
         {step === "content" ? (
           <Pressable
             onPress={() => {
-              if (!isValid) {
-                setErrorMessage("Your thesis must be 1–500 characters.");
-                return;
-              }
               setErrorMessage(null);
               setStep("style");
             }}
-            disabled={!isValid || isBusy || (promptId ? !canCreate : false)}
+            disabled={isBusy || (promptId ? !canCreate : false)}
             className={[
               "w-full items-center justify-center rounded-xl px-4 py-3",
-              !isValid || isBusy || (promptId ? !canCreate : false) ? "bg-muted" : "bg-primary",
+              isBusy || (promptId ? !canCreate : false) ? "bg-muted" : "bg-primary",
             ].join(" ")}
           >
             <Text className="font-mono text-xs uppercase tracking-wider text-background">Next</Text>
@@ -470,6 +433,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
           </View>
         )}
       </View>
+
     </KeyboardAvoidingView>
   );
 }

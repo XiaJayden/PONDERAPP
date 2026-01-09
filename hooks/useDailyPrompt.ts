@@ -5,6 +5,24 @@ import { getPacificTimeForPromptDate, getTodayPacificIsoDate } from "@/lib/timez
 import { getUserPromptOpenTime, setUserPromptOpenTime } from "@/lib/prompt-store";
 import { useAuth } from "@/providers/auth-provider";
 
+function envFlagEnabled(value: string | undefined) {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/**
+ * TEMP: disables prompt timing gates (6am release / 12pm close / 12:30pm post release + 30-min window).
+ *
+ * Default behavior:
+ * - Enabled in dev (`__DEV__`) for fast iteration/testing.
+ * - Can also be enabled explicitly via env var for a TestFlight/preview build.
+ *
+ * Env:
+ * - EXPO_PUBLIC_DISABLE_PROMPT_TIME_RESTRICTIONS=true
+ */
+const DISABLE_PROMPT_TIME_RESTRICTIONS =
+  __DEV__ || envFlagEnabled(process.env.EXPO_PUBLIC_DISABLE_PROMPT_TIME_RESTRICTIONS);
+
 export interface DailyPrompt {
   id: string;
   prompt_text: string;
@@ -205,6 +223,13 @@ export function useDailyPrompt(): UseDailyPromptResult {
       if (isCancelled) return;
       const now = new Date();
 
+      if (DISABLE_PROMPT_TIME_RESTRICTIONS) {
+        // While testing, treat the prompt as always open and posts as already released.
+        setTimeUntilDeadline(null);
+        setTimeUntilRelease(null);
+        return;
+      }
+
       const isDevOverrideActive =
         !!devOverride &&
         (devOverride.expires_at === null || new Date(devOverride.expires_at).getTime() > now.getTime()) &&
@@ -264,6 +289,10 @@ export function useDailyPrompt(): UseDailyPromptResult {
         isResponseWindowOpen: false,
         isInResponseWindow: false,
       };
+    }
+
+    if (DISABLE_PROMPT_TIME_RESTRICTIONS) {
+      return { isPromptAvailable: true, isResponseWindowOpen: true, isInResponseWindow: !!user };
     }
 
     const isDevOverrideActive =

@@ -9,28 +9,7 @@ type Props = {
 
 export function NativeWindProbe(props: Props) {
   useEffect(() => {
-    // #region agent log (hypothesisId:H1)
-    fetch("http://127.0.0.1:7243/ingest/aff388a3-96fd-4fa2-9425-e1475bf41c13", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "pre-fix",
-        hypothesisId: "H1",
-        location: "components/debug/nativewind-probe.tsx:15",
-        message: "NativeWindProbe mounted (props snapshot)",
-        data: {
-          label: props.label ?? null,
-          propKeys: Object.keys(props ?? {}),
-          classNameType: typeof (props as any)?.className,
-          classNameValue: (props as any)?.className ?? null,
-          styleType: typeof (props as any)?.style,
-          styleIsArray: Array.isArray((props as any)?.style),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
+    // Intentionally empty: this component is only for visual verification during debugging.
   }, []);
 
   return (

@@ -123,4 +123,10 @@ begin
   end if;
 end $$;
 
+-- 5) Remove publish_at_1pm_pst column from daily_prompts (no longer needed)
+alter table public.daily_prompts drop column if exists publish_at_1pm_pst;
+
+-- 6) Make display_order nullable (dashboard allows optional display_order)
+alter table public.daily_prompts alter column display_order drop not null;
+
 

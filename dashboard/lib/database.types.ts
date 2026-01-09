@@ -19,7 +19,7 @@ export type Database = {
           id?: string | number;
           prompt_text: string;
           explanation_text?: string | null;
-          prompt_date: string;
+          prompt_date?: string;
           theme?: string | null;
           display_order?: number | null;
           is_active?: boolean | null;

@@ -79,14 +79,14 @@ export default async function PromptDetailPage({ params }: { params: { id: strin
               />
             </label>
             <label className="text-sm">
-              <div className="text-xs text-white/60">Prompt date (YYYY-MM-DD)</div>
+              <div className="text-xs text-white/60">Prompt date</div>
               <input
-                name="prompt_date"
                 type="date"
                 defaultValue={prompt.prompt_date}
-                className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/25"
-                required
+                disabled
+                className="mt-1 w-full cursor-not-allowed rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/70 outline-none"
               />
+              <div className="mt-1 text-xs text-white/50">Auto-managed by the queue (edit is disabled).</div>
             </label>
             <label className="text-sm">
               <div className="text-xs text-white/60">Explanation (optional)</div>
