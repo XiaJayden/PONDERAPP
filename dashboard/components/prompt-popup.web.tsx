@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { Pressable, Text, View } from "react-native-web";
 
@@ -55,11 +56,22 @@ export function PromptPopup({
   );
 }
 
-const styles: Record<string, any> = {
+type WebStyle = React.CSSProperties & {
+  inset?: number | string;
+  paddingHorizontal?: number;
+  paddingVertical?: number;
+  borderWidth?: number;
+  borderColor?: string;
+  flexDirection?: "row" | "column";
+  alignItems?: "center" | "flex-start" | "flex-end" | "stretch";
+  justifyContent?: "center" | "flex-start" | "flex-end" | "space-between" | "space-around";
+};
+
+const styles: Record<string, WebStyle> = {
   // Overlay
   backdrop: {
-    position: "fixed" as any,
-    inset: 0 as any,
+    position: "fixed",
+    inset: 0,
     display: "flex",
     backgroundColor: "rgba(0,0,0,0.70)",
     zIndex: 9999,
