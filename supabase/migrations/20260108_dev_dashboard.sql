@@ -104,4 +104,23 @@ end $$;
 
 -- Writes remain admin-only (dashboard uses service role).
 
+-- 4) Allow service role (dashboard) to manage daily_prompts
+-- Note: Service role should bypass RLS automatically, but this ensures access.
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'daily_prompts'
+      and policyname = 'daily_prompts_service_role_all'
+  ) then
+    create policy daily_prompts_service_role_all
+      on public.daily_prompts
+      for all
+      to service_role
+      using (true)
+      with check (true);
+  end if;
+end $$;
+
 
