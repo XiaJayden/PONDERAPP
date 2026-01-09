@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
-import { Pressable, Text, View } from "react-native-web";
 
 // Local type definition (same as external prompt-popup.tsx) to avoid type-checking external RN files
 export type PromptPopupPrompt = {
@@ -14,7 +13,7 @@ export type PromptPopupPrompt = {
 
 /**
  * Web-only version used by the dev dashboard preview.
- * We intentionally avoid importing `react-native` here so Next/Vercel doesn't need a RN shim.
+ * Uses standard HTML elements instead of react-native-web to avoid type compatibility issues.
  */
 export function PromptPopup({
   isVisible,
@@ -30,52 +29,42 @@ export function PromptPopup({
   if (!isVisible) return null;
 
   return (
-    <View style={styles.backdrop} /* acts like Modal */>
-      <View style={styles.backdropPad}>
-        <View style={styles.sheetWrap}>
-          <View style={styles.card}>
-            <View style={styles.headerRow}>
-              <Text style={styles.kicker}>Today’s PONDR</Text>
-              <Pressable
-                onPress={onClose}
+    <div style={styles.backdrop} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div style={styles.backdropPad}>
+        <div style={styles.sheetWrap}>
+          <div style={styles.card}>
+            <div style={styles.headerRow}>
+              <div style={styles.kicker}>Today's PONDR</div>
+              <button
+                onClick={onClose}
                 style={styles.closeButton}
+                type="button"
               >
-                <Text style={styles.closeIcon}>×</Text>
-              </Pressable>
-            </View>
+                <span style={styles.closeIcon}>×</span>
+              </button>
+            </div>
 
             {!!prompt.explanation_text ? (
-              <Text style={styles.explainer}>{prompt.explanation_text}</Text>
+              <div style={styles.explainer}>{prompt.explanation_text}</div>
             ) : (
-              <Text style={styles.explainer}>Take a moment. Read slowly. Then answer honestly.</Text>
+              <div style={styles.explainer}>Take a moment. Read slowly. Then answer honestly.</div>
             )}
 
-            <View style={styles.questionWrap}>
-              <Text style={styles.question}>{prompt.prompt_text}</Text>
+            <div style={styles.questionWrap}>
+              <div style={styles.question}>{prompt.prompt_text}</div>
 
-              <Pressable onPress={onRespond} style={styles.respondButton}>
-                <Text style={styles.respondText}>Respond</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </View>
-    </View>
+              <button onClick={onRespond} style={styles.respondButton} type="button">
+                <span style={styles.respondText}>Respond</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
-type WebStyle = React.CSSProperties & {
-  inset?: number | string;
-  paddingHorizontal?: number;
-  paddingVertical?: number;
-  borderWidth?: number;
-  borderColor?: string;
-  flexDirection?: "row" | "column";
-  alignItems?: "center" | "flex-start" | "flex-end" | "stretch";
-  justifyContent?: "center" | "flex-start" | "flex-end" | "space-between" | "space-around";
-};
-
-const styles: Record<string, WebStyle> = {
+const styles: Record<string, React.CSSProperties> = {
   // Overlay
   backdrop: {
     position: "fixed",
@@ -84,38 +73,53 @@ const styles: Record<string, WebStyle> = {
     backgroundColor: "rgba(0,0,0,0.70)",
     zIndex: 9999,
   },
-  backdropPad: { flex: 1, paddingHorizontal: 16 },
-  sheetWrap: { flex: 1, justifyContent: "flex-end", paddingBottom: 40 },
+  backdropPad: { flex: 1, paddingLeft: 16, paddingRight: 16 },
+  sheetWrap: { flex: 1, display: "flex", justifyContent: "flex-end", paddingBottom: 40 },
   card: {
     minHeight: 420,
     borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    border: "1px solid rgba(255,255,255,0.10)",
     backgroundColor: "rgba(18,18,18,0.96)",
     padding: 24,
   },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  headerRow: { display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   kicker: {
     fontSize: 12,
-    letterSpacing: 1.2,
+    letterSpacing: "1.2px",
     textTransform: "uppercase",
     color: "rgba(255,255,255,0.80)",
+    fontFamily: "monospace",
   },
-  closeButton: { height: 40, width: 40, alignItems: "center", justifyContent: "center" },
-  closeIcon: { fontSize: 22, lineHeight: 22, color: "rgba(255,255,255,0.55)" },
-  explainer: { marginTop: 20, fontSize: 16, lineHeight: 24, color: "rgba(255,255,255,0.65)" },
-  questionWrap: { marginTop: 24, flex: 1, justifyContent: "flex-end" },
-  question: { fontSize: 30, lineHeight: 36, color: "rgba(255,255,255,0.95)" },
+  closeButton: { 
+    height: 40, 
+    width: 40, 
+    display: "flex", 
+    alignItems: "center", 
+    justifyContent: "center",
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    padding: 0,
+  },
+  closeIcon: { fontSize: 22, lineHeight: "22px", color: "rgba(255,255,255,0.55)" },
+  explainer: { marginTop: 20, fontSize: 16, lineHeight: "24px", color: "rgba(255,255,255,0.65)" },
+  questionWrap: { marginTop: 24, flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end" },
+  question: { fontSize: 30, lineHeight: "36px", color: "rgba(255,255,255,0.95)", fontFamily: "serif" },
   respondButton: {
     marginTop: 16,
+    display: "flex",
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
     backgroundColor: "rgba(255,255,255,0.92)",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingLeft: 16,
+    paddingRight: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+    border: "none",
+    cursor: "pointer",
   },
-  respondText: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", color: "rgba(0,0,0,0.90)" },
+  respondText: { fontSize: 12, letterSpacing: "1.2px", textTransform: "uppercase", color: "rgba(0,0,0,0.90)", fontFamily: "monospace" },
 };
 
 
