@@ -27,7 +27,7 @@ export function PromptCard({
       className="rounded-2xl border border-muted bg-card p-5"
     >
       <View className="flex-row items-center justify-between">
-        <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Today’s PONDR</Text>
+        <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Today’s PONDER</Text>
         <Pressable onPress={onOpen} accessibilityRole="button">
           <Text className="font-mono text-xs text-primary">Open</Text>
         </Pressable>
@@ -45,6 +45,8 @@ export function PromptCard({
     </Pressable>
   );
 }
+
+
 
 
 

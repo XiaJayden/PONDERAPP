@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/providers/auth-provider";
 
 /**
  * Friends system (native).
@@ -43,61 +45,53 @@ function makeToken() {
 }
 
 export function useFriends() {
-  const [friends, setFriends] = useState<FriendProfile[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+
+  const q = useQuery({
+    queryKey: userId ? friendsQueryKey(userId) : ["friends", "anonymous"],
+    queryFn: () => fetchFriends(userId as string),
+    enabled: !!userId,
+  });
 
   const refetch = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
+    await q.refetch();
+  }, [q]);
 
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  return useMemo(
+    () => ({
+      friends: q.data ?? [],
+      isLoading: q.isLoading,
+      errorMessage: q.error instanceof Error ? q.error.message : q.error ? String(q.error) : null,
+      refetch,
+    }),
+    [q.data, q.error, q.isLoading, refetch]
+  );
+}
 
-      if (!user) {
-        setFriends([]);
-        return;
-      }
+export function friendsQueryKey(userId: string) {
+  return ["friends", userId] as const;
+}
 
-      const { data: friendships, error: friendshipsError } = await supabase
-        .from("friendships")
-        .select("user_id, friend_id, status")
-        .or(`user_id.eq.${user.id},friend_id.eq.${user.id}`)
-        .eq("status", "accepted");
+export async function fetchFriends(userId: string): Promise<FriendProfile[]> {
+  const { data: friendships, error: friendshipsError } = await supabase
+    .from("friendships")
+    .select("user_id, friend_id, status")
+    .or(`user_id.eq.${userId},friend_id.eq.${userId}`)
+    .eq("status", "accepted");
 
-      if (friendshipsError) throw friendshipsError;
+  if (friendshipsError) throw friendshipsError;
 
-      const friendIds =
-        friendships?.map((f) => (f.user_id === user.id ? f.friend_id : f.user_id)).filter(Boolean) ?? [];
+  const friendIds = friendships?.map((f: any) => (f.user_id === userId ? f.friend_id : f.user_id)).filter(Boolean) ?? [];
+  if (friendIds.length === 0) return [];
 
-      if (friendIds.length === 0) {
-        setFriends([]);
-        return;
-      }
+  const { data: profiles, error: profilesError } = await supabase
+    .from("profiles")
+    .select("id, username, first_name, avatar_url")
+    .in("id", friendIds);
 
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id, username, first_name, avatar_url")
-        .in("id", friendIds);
-
-      if (profilesError) throw profilesError;
-
-      setFriends((profiles ?? []) as FriendProfile[]);
-    } catch (error) {
-      console.error("[useFriends] refetch failed", error);
-      setErrorMessage(error instanceof Error ? error.message : "Failed to load friends");
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refetch();
-  }, [refetch]);
-
-  return useMemo(() => ({ friends, isLoading, errorMessage, refetch }), [friends, isLoading, errorMessage, refetch]);
+  if (profilesError) throw profilesError;
+  return (profiles ?? []) as FriendProfile[];
 }
 
 export async function createFriendInvitation() {
@@ -209,6 +203,8 @@ export async function deleteFriendship(friendId: string) {
   const error = e1 || e2;
   if (error) throw error;
 }
+
+
 
 
 

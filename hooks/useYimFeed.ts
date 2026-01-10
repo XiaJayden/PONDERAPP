@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { getTodayPacificIsoDate } from "@/lib/timezone";
+import { getPacificIsoDateForCycleStart, getTodayPacificIsoDate } from "@/lib/timezone";
 import type { BackgroundType, FontColor, FontSize, FontStyle, Post, TextHighlight } from "@/components/posts/yim-post";
+import { useAuth } from "@/providers/auth-provider";
 
 /**
  * YIM feed + post mutation hooks (native).
@@ -212,6 +214,7 @@ function mapRowToPost(row: YimPostRow, signedUrlMap: Map<string, string>, author
     authorUsername: authorInfo?.authorUsername,
     authorAvatarUrl: authorInfo?.authorAvatarUrl,
     promptId: row.prompt_id ?? undefined,
+    promptDate: row.prompt_date ?? undefined,
   };
 }
 
@@ -287,132 +290,224 @@ export async function updatePostExpandedText(params: { postId: string; expandedT
   if (error) throw error;
 }
 
+function addDaysToIsoDate(isoDate: string, deltaDays: number) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!match) throw new Error(`[useYimFeed] Invalid ISO date: ${isoDate}`);
+  const [, y, m, d] = match;
+  const ms = Date.UTC(Number(y), Number(m) - 1, Number(d) + deltaDays, 12, 0, 0);
+  const dd = new Date(ms);
+  const yy = dd.getUTCFullYear();
+  const mm = String(dd.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(dd.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${day}`;
+}
+
+export function yimFeedQueryKey(userId: string, promptDate: string) {
+  return ["yimFeed", userId, promptDate] as const;
+}
+
+export function pendingPostQueryKey(userId: string, promptDate: string) {
+  return ["pendingPost", userId, promptDate] as const;
+}
+
+async function fetchAuthorIdsForUser(userId: string) {
+  const { data: friendships, error: friendshipsError } = await supabase
+    .from("friendships")
+    .select("user_id, friend_id, status")
+    .or(`user_id.eq.${userId},friend_id.eq.${userId}`)
+    .eq("status", "accepted");
+
+  if (friendshipsError) {
+    console.warn("[fetchYimFeed] friendships fetch failed", friendshipsError);
+  }
+
+  const friendIds =
+    friendships?.map((f) => (f.user_id === userId ? f.friend_id : f.user_id)).filter(Boolean) ?? [];
+  return Array.from(new Set([...friendIds, userId]));
+}
+
+export async function fetchYimFeed(userId: string, promptDate: string): Promise<Post[]> {
+  // Single-login daily cycle: show "yesterday" posts (prompt_date = promptDate) for user + friends.
+  const authorIds = await fetchAuthorIdsForUser(userId);
+
+  let query = supabase
+    .from("yim_posts")
+    .select(
+      "id, author_id, quote, attribution, background, font, font_color, font_size, text_highlight, photo_background_url, expanded_text, prompt_id, prompt_date, created_at"
+    )
+    .eq("prompt_date", promptDate)
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (authorIds.length > 0) query = query.in("author_id", authorIds);
+
+  const { data: rows, error } = await query;
+  if (error) throw error;
+
+  const signedUrlMap = await hydrateSignedUrls((rows ?? []) as YimPostRow[]);
+  const authorIdsForProfiles = Array.from(
+    new Set(((rows ?? []) as YimPostRow[]).map((r) => r.author_id).filter(Boolean))
+  );
+  const authorInfoMap = await hydrateAuthorInfo(authorIdsForProfiles);
+  return ((rows ?? []) as YimPostRow[]).map((r) => mapRowToPost(r, signedUrlMap, authorInfoMap));
+}
+
+export async function fetchPendingPost(userId: string, promptDate: string): Promise<Post | null> {
+  const { data: row, error } = await supabase
+    .from("yim_posts")
+    .select(
+      "id, author_id, quote, attribution, background, font, font_color, font_size, text_highlight, photo_background_url, expanded_text, prompt_id, prompt_date, created_at"
+    )
+    .eq("author_id", userId)
+    .eq("prompt_date", promptDate)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!row) return null;
+
+  const signedUrlMap = await hydrateSignedUrls([row as YimPostRow]);
+  const authorInfoMap = await hydrateAuthorInfo([userId]);
+  return mapRowToPost(row as YimPostRow, signedUrlMap, authorInfoMap);
+}
+
+export function userPostsQueryKey(userId: string) {
+  return ["userPosts", userId] as const;
+}
+
+export async function fetchUserPosts(userId: string): Promise<Post[]> {
+  const { data: rows, error } = await supabase
+    .from("yim_posts")
+    .select(
+      "id, author_id, quote, attribution, background, font, font_color, font_size, text_highlight, photo_background_url, expanded_text, prompt_id, prompt_date, created_at"
+    )
+    .eq("author_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) throw error;
+
+  const signedUrlMap = await hydrateSignedUrls((rows ?? []) as YimPostRow[]);
+  const authorInfoMap = await hydrateAuthorInfo([userId]);
+  return ((rows ?? []) as YimPostRow[]).map((r) => mapRowToPost(r, signedUrlMap, authorInfoMap));
+}
+
 export function useYimFeed() {
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isHardRefreshing, setIsHardRefreshing] = useState(false);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const userId = user?.id ?? null;
 
-  const refetch = useCallback(async (forceRefresh = false) => {
-    setErrorMessage(null);
-    if (!forceRefresh) setIsRefreshing(true);
-    else setIsLoading(true);
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  const cycleDateKey = useMemo(() => getPacificIsoDateForCycleStart(new Date(nowTick), 6), [nowTick]);
+  const yesterdayDateKey = useMemo(() => addDaysToIsoDate(cycleDateKey, -1), [cycleDateKey]);
 
-      if (!user) {
-        setPosts([]);
+  // Keep cycle date rolling at 6AM.
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const feedQ = useQuery({
+    queryKey: userId ? yimFeedQueryKey(userId, yesterdayDateKey) : ["yimFeed", "anonymous"],
+    queryFn: () => fetchYimFeed(userId as string, yesterdayDateKey),
+    enabled: !!userId,
+  });
+
+  const pendingQ = useQuery({
+    queryKey: userId ? pendingPostQueryKey(userId, cycleDateKey) : ["pendingPost", "anonymous"],
+    queryFn: () => fetchPendingPost(userId as string, cycleDateKey),
+    enabled: !!userId,
+  });
+
+  const refetch = useCallback(
+    async (forceRefresh = false) => {
+      if (!userId) return;
+      if (!forceRefresh) setIsRefreshing(true);
+      else setIsHardRefreshing(true);
+      try {
+        await Promise.allSettled([feedQ.refetch(), pendingQ.refetch()]);
+      } finally {
+        setIsRefreshing(false);
+        setIsHardRefreshing(false);
+      }
+    },
+    [feedQ, pendingQ, userId]
+  );
+
+  const addPostOptimistically = useCallback(
+    (post: Post) => {
+      if (!userId) return;
+      const postPromptDate = post.promptDate;
+      if (postPromptDate && postPromptDate === cycleDateKey) {
+        queryClient.setQueryData<Post | null>(pendingPostQueryKey(userId, cycleDateKey), () => post);
         return;
       }
-
-      // MVP: show user's own posts + friend posts by accepted friendships.
-      const { data: friendships, error: friendshipsError } = await supabase
-        .from("friendships")
-        .select("user_id, friend_id, status")
-        .or(`user_id.eq.${user.id},friend_id.eq.${user.id}`)
-        .eq("status", "accepted");
-
-      if (friendshipsError) {
-        console.warn("[useYimFeed] friendships fetch failed", friendshipsError);
+      if (postPromptDate && postPromptDate === yesterdayDateKey) {
+        queryClient.setQueryData<Post[]>(yimFeedQueryKey(userId, yesterdayDateKey), (prev) => [post, ...(prev ?? [])]);
       }
-
-      const friendIds =
-        friendships?.map((f) => (f.user_id === user.id ? f.friend_id : f.user_id)).filter(Boolean) ?? [];
-      const authorIds = Array.from(new Set([...friendIds, user.id]));
-
-      let query = supabase
-        .from("yim_posts")
-        .select(
-          "id, author_id, quote, attribution, background, font, font_color, font_size, text_highlight, photo_background_url, expanded_text, prompt_id, prompt_date, created_at"
-        )
-        .order("created_at", { ascending: false })
-        .limit(50);
-
-      if (authorIds.length > 0) query = query.in("author_id", authorIds);
-
-      const { data: rows, error } = await query;
-      if (error) throw error;
-
-      const signedUrlMap = await hydrateSignedUrls((rows ?? []) as YimPostRow[]);
-      const authorIdsForProfiles = Array.from(new Set(((rows ?? []) as YimPostRow[]).map((r) => r.author_id).filter(Boolean)));
-      const authorInfoMap = await hydrateAuthorInfo(authorIdsForProfiles);
-      const mapped = ((rows ?? []) as YimPostRow[]).map((r) => mapRowToPost(r, signedUrlMap, authorInfoMap));
-
-      setPosts(mapped);
-    } catch (error) {
-      console.error("[useYimFeed] refetch failed", error);
-      setErrorMessage(error instanceof Error ? error.message : "Failed to load feed");
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refetch(true);
-  }, [refetch]);
-
-  const addPostOptimistically = useCallback((post: Post) => {
-    setPosts((prev) => [post, ...prev]);
-  }, []);
-
-  return useMemo(
-    () => ({ posts, isLoading, errorMessage, isRefreshing, refetch, addPostOptimistically }),
-    [posts, isLoading, errorMessage, isRefreshing, refetch, addPostOptimistically]
+    },
+    [cycleDateKey, queryClient, userId, yesterdayDateKey]
   );
+
+  return useMemo(() => {
+    const errorMessage =
+      (feedQ.error instanceof Error ? feedQ.error.message : feedQ.error ? String(feedQ.error) : null) ??
+      (pendingQ.error instanceof Error ? pendingQ.error.message : pendingQ.error ? String(pendingQ.error) : null);
+    return {
+      cycleDateKey,
+      yesterdayDateKey,
+      posts: feedQ.data ?? [],
+      yesterdayPosts: feedQ.data ?? [],
+      pendingPost: pendingQ.data ?? null,
+      isLoading: feedQ.isLoading || pendingQ.isLoading || isHardRefreshing,
+      errorMessage,
+      isRefreshing,
+      refetch,
+      addPostOptimistically,
+    };
+  }, [
+    addPostOptimistically,
+    cycleDateKey,
+    feedQ.data,
+    feedQ.error,
+    feedQ.isLoading,
+    isHardRefreshing,
+    isRefreshing,
+    pendingQ.data,
+    pendingQ.error,
+    pendingQ.isLoading,
+    refetch,
+    yesterdayDateKey,
+  ]);
 }
 
 export function useUserPosts() {
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+
+  const q = useQuery({
+    queryKey: userId ? userPostsQueryKey(userId) : ["userPosts", "anonymous"],
+    queryFn: () => fetchUserPosts(userId as string),
+    enabled: !!userId,
+  });
 
   const refetch = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
+    await q.refetch();
+  }, [q]);
 
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setPosts([]);
-        return;
-      }
-
-      const { data: rows, error } = await supabase
-        .from("yim_posts")
-        .select(
-          "id, author_id, quote, attribution, background, font, font_color, font_size, text_highlight, photo_background_url, expanded_text, prompt_id, prompt_date, created_at"
-        )
-        .eq("author_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-
-      const signedUrlMap = await hydrateSignedUrls((rows ?? []) as YimPostRow[]);
-      const authorInfoMap = await hydrateAuthorInfo([user.id]);
-      const mapped = ((rows ?? []) as YimPostRow[]).map((r) => mapRowToPost(r, signedUrlMap, authorInfoMap));
-      setPosts(mapped);
-    } catch (error) {
-      console.error("[useUserPosts] refetch failed", error);
-      setErrorMessage(error instanceof Error ? error.message : "Failed to load your posts");
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refetch();
-  }, [refetch]);
-
-  return { posts, isLoading, errorMessage, refetch };
+  return {
+    posts: q.data ?? [],
+    isLoading: q.isLoading,
+    errorMessage: q.error instanceof Error ? q.error.message : q.error ? String(q.error) : null,
+    refetch,
+  };
 }
+
+
 
 
 

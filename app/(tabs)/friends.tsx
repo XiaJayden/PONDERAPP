@@ -71,7 +71,7 @@ export default function FriendsScreen() {
     try {
       await Share.share({
         title: "Join me on PONDER",
-        message: `I'm capturing moments with words on PONDR. Join me!\n\n${inviteUrl}`,
+        message: `I'm capturing moments with words on PONDER. Join me!\n\n${inviteUrl}`,
       });
     } catch (error) {
       console.warn("[friends] share cancelled/failed", error);
@@ -92,12 +92,14 @@ export default function FriendsScreen() {
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
       <View className="flex-1 px-4 pt-6 pb-24">
-        <View className="flex-row items-center justify-between">
-          <Text className="font-display text-3xl text-foreground">Friends</Text>
+        <View className="relative items-center justify-center">
+          <Text className="font-display text-4xl text-foreground">Friends</Text>
           {!canUseFriends ? (
-            <Pressable onPress={() => router.replace("/(auth)/login")} className="rounded-xl border border-muted bg-card px-4 py-2">
-              <Text className="font-mono text-xs uppercase tracking-wider text-foreground">Login</Text>
-            </Pressable>
+            <View className="absolute right-0">
+              <Pressable onPress={() => router.replace("/(auth)/login")} className="rounded-xl border border-muted bg-card px-4 py-2">
+                <Text className="font-mono text-xs uppercase tracking-wider text-foreground">Login</Text>
+              </Pressable>
+            </View>
           ) : null}
         </View>
 

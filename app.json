@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "pondr-native",
-    "slug": "pondr-native",
+    "name": "PONDER-native",
+    "slug": "PONDER-native",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "pondrnative",
+    "scheme": "PONDERnative",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {

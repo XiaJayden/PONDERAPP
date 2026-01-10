@@ -1,5 +1,4 @@
 import type { Session, User } from "@supabase/supabase-js";
-import * as AuthSession from "expo-auth-session";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -8,6 +7,33 @@ import { supabase } from "@/lib/supabase";
 
 // Completes the auth session on web (safe no-op on native). Keeps behavior consistent.
 WebBrowser.maybeCompleteAuthSession();
+
+function getOAuthRedirectUrl() {
+  // IMPORTANT:
+  // - Custom scheme redirects require a Dev Client / standalone build (not Expo Go).
+  // - We keep this path stable so you can whitelist it in Supabase Redirect URLs.
+  const scheme = "PONDERnative"; // keep in sync with `app.json` -> expo.scheme
+  return Linking.createURL("auth/callback", { scheme }); // e.g. PONDERnative://auth/callback
+}
+
+async function exchangeCodeFromUrl(url: string) {
+  // Supabase OAuth (PKCE) returns `code` as a query param in the redirect.
+  const parsed = Linking.parse(url);
+  const code = parsed.queryParams?.code;
+  const error = parsed.queryParams?.error;
+  const errorDescription = parsed.queryParams?.error_description;
+
+  if (error) {
+    throw new Error(typeof errorDescription === "string" ? errorDescription : String(error));
+  }
+
+  if (!code || typeof code !== "string") {
+    throw new Error("[auth] OAuth redirect missing `code` param");
+  }
+
+  const exchange = await supabase.auth.exchangeCodeForSession(code);
+  if (exchange.error) throw exchange.error;
+}
 
 interface AuthContextValue {
   user: User | null;
@@ -33,6 +59,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     async function init() {
       try {
+        // Handle cold-start deep links (e.g. after OAuth redirect).
+        const initialUrl = await Linking.getInitialURL();
+        if (initialUrl) {
+          try {
+            await exchangeCodeFromUrl(initialUrl);
+          } catch (e) {
+            if (__DEV__) console.warn("[auth] initial URL exchange failed", e);
+          }
+        }
+
         const { data, error } = await supabase.auth.getSession();
         if (isCancelled) return;
 
@@ -55,9 +91,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(nextSession);
     });
 
+    const urlSub = Linking.addEventListener("url", ({ url }) => {
+      // Best-effort: if app is opened via OAuth redirect, exchange the code for a session.
+      void (async () => {
+        try {
+          await exchangeCodeFromUrl(url);
+        } catch (e) {
+          if (__DEV__) console.warn("[auth] url event exchange failed", e);
+        }
+      })();
+    });
+
     return () => {
       isCancelled = true;
       subscriptionData.subscription.unsubscribe();
+      urlSub.remove();
     };
   }, []);
 
@@ -97,8 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function signInWithGoogle() {
     setErrorMessage(null);
 
-    // Uses your Expo scheme in `app.json` (currently: `pondrnative`).
-    const redirectTo = AuthSession.makeRedirectUri({ scheme: "pondrnative" });
+    const redirectTo = getOAuthRedirectUrl();
 
     if (__DEV__) console.log("[auth] signInWithGoogle redirectTo", { redirectTo });
 
@@ -129,22 +176,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (result.type !== "success" || !result.url) return;
 
-    // Supabase OAuth returns `code` for PKCE.
-    const parsed = Linking.parse(result.url);
-    const code = parsed.queryParams?.code;
-
-    if (!code || typeof code !== "string") {
-      const err = new Error("[auth] OAuth redirect missing `code` param");
-      console.error(err, { url: result.url, parsed });
-      setErrorMessage(err.message);
-      throw err;
-    }
-
-    const exchange = await supabase.auth.exchangeCodeForSession(code);
-    if (exchange.error) {
-      console.error("[auth] exchangeCodeForSession failed", exchange.error);
-      setErrorMessage(exchange.error.message);
-      throw exchange.error;
+    try {
+      await exchangeCodeFromUrl(result.url);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[auth] exchangeCodeFromUrl failed", e);
+      setErrorMessage(msg);
+      throw e;
     }
   }
 

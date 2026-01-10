@@ -28,8 +28,8 @@ function showReportMenu(params: { onReport: () => void }) {
 
 export function PostHeader({ post }: { post: Post }) {
   const label = useMemo(() => {
-    if (post.authorLabel) return post.authorLabel;
     if (post.authorUsername) return post.authorUsername;
+    if (post.authorLabel) return post.authorLabel;
     if (post.authorId) return `Friend ${post.authorId.slice(-4)}`;
     return "Friend";
   }, [post.authorId, post.authorLabel, post.authorUsername]);
@@ -49,9 +49,8 @@ export function PostHeader({ post }: { post: Post }) {
           )}
         </View>
 
-        <View className="gap-0.5">
-          <Text className="font-body text-base text-foreground">{label}</Text>
-          <Text className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Today’s YIM</Text>
+        <View className="justify-center">
+          <Text className="font-body text-lg leading-5 text-foreground">{label}</Text>
         </View>
       </View>
 

@@ -1,12 +1,15 @@
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { router } from "expo-router";
-import { Home, Image as ImageIcon, Plus, User, Users } from "lucide-react-native";
+import { Eye, Home, Image as ImageIcon, Plus, User, Users } from "lucide-react-native";
 import React from "react";
-import { Pressable, Text, View } from "react-native";
+import { Alert, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useAuth } from "@/providers/auth-provider";
+import { PostPreviewModal } from "@/components/posts/post-preview-modal";
 import { useDailyPrompt } from "@/hooks/useDailyPrompt";
+import { useYimFeed } from "@/hooks/useYimFeed";
+import { useAuth } from "@/providers/auth-provider";
+import { useDevTools } from "@/providers/dev-tools-provider";
 
 type TabRouteName = "index" | "friends" | "create" | "gallery" | "profile";
 
@@ -47,12 +50,22 @@ export function BottomNav(props: BottomTabBarProps) {
   const currentRoute = props.state.routes[props.state.index];
   const { user } = useAuth();
   const dailyPrompt = useDailyPrompt();
+  const feed = useYimFeed();
+  const devTools = useDevTools();
 
-  // Match web behavior: create is only enabled during the user's response window.
-  const canCreate = !!user && dailyPrompt.isInResponseWindow;
+  const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
+
+  // In the single-login cycle:
+  // - Before answering: plus opens the prompt popup (starts the 15-min window)
+  // - After answering: plus becomes an "eye" to preview today's pending post
+  const hasAnsweredToday = !!user && dailyPrompt.hasAnsweredToday;
+  const canOpenPrompt = !!user && !!dailyPrompt.prompt && dailyPrompt.isPromptAvailable && dailyPrompt.isResponseWindowOpen;
+  const createEnabled = hasAnsweredToday ? !!feed.pendingPost : canOpenPrompt;
 
   return (
     <View className="bg-transparent">
+      <PostPreviewModal isVisible={isPreviewOpen} post={feed.pendingPost ?? null} onClose={() => setIsPreviewOpen(false)} />
+
       <View 
         style={{ 
           backgroundColor: "#241E1A",
@@ -75,8 +88,21 @@ export function BottomNav(props: BottomTabBarProps) {
 
           <CreateButton
             isActive={currentRoute.name === "create"}
-            isEnabled={canCreate}
-            onPress={() => router.replace("/(tabs)/create")}
+            isEnabled={createEnabled}
+            variant={hasAnsweredToday ? "preview" : "create"}
+            onPress={() => {
+              if (hasAnsweredToday) {
+                if (!feed.pendingPost) {
+                  Alert.alert("No pending post", "You haven't submitted today's post yet.");
+                  return;
+                }
+                setIsPreviewOpen(true);
+                return;
+              }
+
+              if (!canOpenPrompt) return;
+              devTools.openPromptPopup();
+            }}
           />
 
           <NavButton
@@ -125,7 +151,17 @@ function NavButton({
   );
 }
 
-function CreateButton({ isActive, isEnabled, onPress }: { isActive: boolean; isEnabled: boolean; onPress: () => void }) {
+function CreateButton({
+  isActive,
+  isEnabled,
+  variant,
+  onPress,
+}: {
+  isActive: boolean;
+  isEnabled: boolean;
+  variant: "create" | "preview";
+  onPress: () => void;
+}) {
   // Intentionally “dumb” button: gating happens in BottomNav based on prompt timing.
 
   return (
@@ -142,14 +178,15 @@ function CreateButton({ isActive, isEnabled, onPress }: { isActive: boolean; isE
       <View
         className={[
           "relative -mt-10 items-center justify-center rounded-full",
-          isEnabled ? "bg-primary" : "bg-muted",
+          isEnabled ? (variant === "preview" ? "bg-foreground" : "bg-primary") : "bg-muted",
         ].join(" ")}
         style={{ height: 72, width: 72 }}
       >
-        {getIcon("create", isEnabled ? "hsl(0 0% 4%)" : "hsl(0 0% 55%)")}
-
-        {/* Small pulse dot like web app */}
-        {isEnabled ? <View className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-accent" /> : null}
+        {variant === "preview" ? (
+          <Eye color={isEnabled ? "hsl(0 0% 4%)" : "hsl(0 0% 55%)"} size={30} />
+        ) : (
+          getIcon("create", isEnabled ? "hsl(0 0% 4%)" : "hsl(0 0% 55%)")
+        )}
       </View>
     </Pressable>
   );

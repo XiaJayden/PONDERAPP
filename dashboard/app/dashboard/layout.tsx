@@ -7,7 +7,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-6">
             <Link href="/dashboard" className="text-sm font-semibold tracking-wide">
-              Pondr Dev
+              PONDER Dev
             </Link>
             <nav className="flex items-center gap-4 text-sm text-white/70">
               <Link className="hover:text-white" href="/dashboard/prompts">
@@ -38,6 +38,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     </div>
   );
 }
+
+
 
 
 

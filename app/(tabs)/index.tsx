@@ -1,98 +1,47 @@
 import { router } from "expo-router";
 import { Bell } from "lucide-react-native";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useQuery } from "@tanstack/react-query";
 
 import { ExpandedPostModal } from "@/components/posts/expanded-post-modal";
 import { PostFooterActions, PostHeader } from "@/components/posts/post-chrome";
+import { BlurredPost } from "@/components/posts/blurred-post";
 import { YimPost, type Post } from "@/components/posts/yim-post";
-import { PostingWindowBanner } from "@/components/prompts/posting-window";
-import { PromptCard } from "@/components/prompts/prompt-card";
-import { PromptPopup } from "@/components/prompts/prompt-popup";
-import { useDailyPrompt } from "@/hooks/useDailyPrompt";
+import { dailyPromptForDateQueryKey, fetchPromptForDate, useDailyPrompt } from "@/hooks/useDailyPrompt";
 import { useYimFeed } from "@/hooks/useYimFeed";
-import { markPromptPopupShown, wasPromptPopupShown } from "@/lib/prompt-store";
-import { getTodayPacificIsoDate } from "@/lib/timezone";
 import { useAuth } from "@/providers/auth-provider";
+import { useDevTools } from "@/providers/dev-tools-provider";
+
+function formatHms(ms: number | null) {
+  const totalSeconds = Math.max(0, Math.floor((ms ?? 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
 
 export default function FeedScreen() {
-  const { user } = useAuth();
   const dailyPrompt = useDailyPrompt();
   const feed = useYimFeed();
+  const devTools = useDevTools();
 
-  const [showPromptPopup, setShowPromptPopup] = useState(false);
   const [expandedPost, setExpandedPost] = useState<Post | null>(null);
 
-  const todayPacific = useMemo(() => getTodayPacificIsoDate(), []);
+  const hasAnsweredToday = dailyPrompt.hasAnsweredToday;
 
-  // Auto-show prompt popup once per day when prompt becomes available and user hasn't responded.
-  useEffect(() => {
-    const userId = user?.id;
-    if (!userId) return;
-    const ensuredUserId = userId;
-    if (dailyPrompt.isLoading) return;
-    if (!dailyPrompt.prompt) return;
-    if (!dailyPrompt.isPromptAvailable) return;
-    if (dailyPrompt.hasResponded) return;
+  const yesterdayPromptQ = useQuery({
+    queryKey: dailyPromptForDateQueryKey(feed.yesterdayDateKey),
+    queryFn: () => fetchPromptForDate(feed.yesterdayDateKey),
+    enabled: !!feed.yesterdayDateKey,
+  });
 
-    let cancelled = false;
-
-    async function check() {
-      const shown = await wasPromptPopupShown({
-        userId: ensuredUserId,
-        promptId: dailyPrompt.prompt!.id,
-        dateKey: todayPacific,
-      });
-      if (cancelled) return;
-      if (shown) return;
-      setShowPromptPopup(true);
-      await markPromptPopupShown({ userId: ensuredUserId, promptId: dailyPrompt.prompt!.id, dateKey: todayPacific });
-    }
-
-    void check();
-    return () => {
-      cancelled = true;
-    };
-  }, [dailyPrompt.hasResponded, dailyPrompt.isLoading, dailyPrompt.isPromptAvailable, dailyPrompt.prompt, todayPacific, user]);
-
-  const arePostsVisible = useMemo(() => {
-    // Web behavior: before 12:30pm PT, hide posts (but still show prompt card).
-    if (!dailyPrompt.prompt) return true;
-    return dailyPrompt.timeUntilRelease === null;
-  }, [dailyPrompt.prompt, dailyPrompt.timeUntilRelease]);
-
-  const shouldShowPostingBanner = useMemo(() => {
-    if (!dailyPrompt.prompt) return false;
-    if (dailyPrompt.isInResponseWindow) return true;
-    // Also show when counting down to release.
-    return dailyPrompt.timeUntilRelease !== null && dailyPrompt.timeUntilRelease > 0;
-  }, [dailyPrompt.isInResponseWindow, dailyPrompt.prompt, dailyPrompt.timeUntilRelease]);
+  const yesterdayPrompt = yesterdayPromptQ.data ?? null;
 
   return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-1">
-        {/* Prompt Popup */}
-        {dailyPrompt.prompt ? (
-          <PromptPopup
-            isVisible={showPromptPopup}
-            prompt={dailyPrompt.prompt}
-            onClose={() => setShowPromptPopup(false)}
-            onRespond={() => {
-              setShowPromptPopup(false);
-              void dailyPrompt.markPromptOpened();
-              router.replace({
-                pathname: "/(tabs)/create",
-                params: {
-                  promptId: dailyPrompt.prompt!.id,
-                  promptText: dailyPrompt.prompt!.prompt_text,
-                  promptDate: dailyPrompt.prompt!.prompt_date,
-                },
-              });
-            }}
-          />
-        ) : null}
-
         {/* Expanded Post */}
         <ExpandedPostModal
           isVisible={!!expandedPost}
@@ -101,18 +50,9 @@ export default function FeedScreen() {
           onUpdated={() => void feed.refetch(true)}
         />
 
-        {shouldShowPostingBanner ? (
-          <PostingWindowBanner
-            isActive={dailyPrompt.isInResponseWindow}
-            timeRemainingMs={dailyPrompt.timeUntilDeadline}
-            timeUntilReleaseMs={dailyPrompt.timeUntilRelease}
-            isResponseWindowOpen={dailyPrompt.isResponseWindowOpen}
-          />
-        ) : null}
-
         <ScrollView
           className="flex-1"
-          contentContainerClassName={["px-4 pb-24", shouldShowPostingBanner ? "pt-16" : "pt-0"].join(" ")}
+          contentContainerClassName="px-4 pb-24"
           refreshControl={<RefreshControl refreshing={feed.isRefreshing} onRefresh={() => void feed.refetch()} />}
         >
           {/* Header */}
@@ -123,7 +63,7 @@ export default function FeedScreen() {
             <View className="flex-1 items-center">
               <Image
                 source={require("../../assets/images/ponder logo.png")}
-                accessibilityLabel="pondr"
+                accessibilityLabel="PONDER"
                 style={{ width: 200, height: 74, resizeMode: "contain", marginBottom: -14 }}
               />
             </View>
@@ -141,48 +81,59 @@ export default function FeedScreen() {
             </View>
           </View>
 
-          {/* Prompt card */}
-          {dailyPrompt.prompt && dailyPrompt.isPromptAvailable && !showPromptPopup ? (
-            <View className="mt-6">
-              <PromptCard
-                prompt={dailyPrompt.prompt}
-                onOpen={() => setShowPromptPopup(true)}
-                onRespond={() => {
-                  void dailyPrompt.markPromptOpened();
-                  router.replace({
-                    pathname: "/(tabs)/create",
-                    params: {
-                      promptId: dailyPrompt.prompt!.id,
-                      promptText: dailyPrompt.prompt!.prompt_text,
-                      promptDate: dailyPrompt.prompt!.prompt_date,
-                    },
-                  });
+          {/* Not Answered CTA */}
+          {!hasAnsweredToday ? (
+            <View className="mt-6 rounded-2xl border border-muted bg-card p-5">
+              <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">To view yesterday’s posts</Text>
+              <Text className="mt-3 font-playfair text-2xl leading-tight text-foreground">
+                Answer today’s PONDER.
+              </Text>
+
+              <Pressable
+                onPress={() => {
+                  if (!dailyPrompt.prompt) return;
+                  devTools.openPromptPopup();
                 }}
-              />
+                accessibilityRole="button"
+                className="mt-4 items-center justify-center rounded-xl bg-primary px-4 py-3"
+                disabled={!dailyPrompt.prompt || !dailyPrompt.isPromptAvailable || !dailyPrompt.isResponseWindowOpen}
+              >
+                <Text className="font-mono text-xs uppercase tracking-wider text-background">Respond Now</Text>
+              </Pressable>
+
+              <Text className="mt-3 text-center font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                {formatHms(dailyPrompt.timeUntilCycleEnd)} until 6AM
+              </Text>
+            </View>
+          ) : yesterdayPrompt ? (
+            <View className="mt-6 rounded-2xl border border-muted bg-card p-5">
+              <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Yesterday’s PONDER</Text>
+              <Text className="mt-3 font-playfair text-2xl leading-tight text-foreground">{yesterdayPrompt.prompt_text}</Text>
             </View>
           ) : null}
 
           {/* Posts */}
           <View className="mt-8 gap-6">
-            {!arePostsVisible ? (
-              <View className="items-center justify-center py-10">
-                <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                  Posts release at 12:30pm PT
-                </Text>
-              </View>
-            ) : feed.isLoading ? (
+            {feed.isLoading ? (
               <View className="items-center justify-center py-10">
                 <Text className="font-mono text-sm text-muted-foreground">Loading posts…</Text>
               </View>
             ) : feed.posts.length === 0 ? (
               <View className="items-center justify-center py-10">
-                <Text className="font-mono text-sm text-muted-foreground">No posts yet. Create your first PONDR.</Text>
+                <Text className="font-mono text-sm text-muted-foreground">No posts yet.</Text>
               </View>
-            ) : (
+            ) : hasAnsweredToday ? (
               feed.posts.map((post) => (
                 <View key={post.id} className="w-full">
                   <PostHeader post={post} />
                   <YimPost post={post} onPress={() => setExpandedPost(post)} />
+                  <PostFooterActions />
+                </View>
+              ))
+            ) : (
+              feed.posts.map((post) => (
+                <View key={post.id} className="w-full">
+                  <BlurredPost post={post} />
                   <PostFooterActions />
                 </View>
               ))
