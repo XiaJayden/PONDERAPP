@@ -36,9 +36,9 @@ export function AnsweringStateCountdown({ timeUntilReleaseMs }: { timeUntilRelea
   const countdown = useMemo(() => formatCountdown(timeUntilReleaseMs ?? 0), [timeUntilReleaseMs]);
 
   return (
-    <View className="flex-1 items-center justify-center py-14">
+    <View className="items-center justify-center py-14">
       <Text className="mb-10 font-mono text-[14px] uppercase tracking-[3px] text-muted-foreground">
-        Posts release at 5:00pm PST
+        Until viewing
       </Text>
 
       <View className="flex-row gap-6">

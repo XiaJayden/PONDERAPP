@@ -15,11 +15,13 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { YimPost, type BackgroundType, type FontColor, type FontSize, type FontStyle, type Post, type TextHighlight } from "@/components/posts/yim-post";
-import { useDailyPrompt } from "@/hooks/useDailyPrompt";
+import { YimPost, type BackgroundType, type FontColor, type FontSize, type FontStyle, type Post } from "@/components/posts/yim-post";
+import { didRespondQueryKey, useDailyPrompt } from "@/hooks/useDailyPrompt";
 import { createYimPost } from "@/hooks/useYimFeed";
 import { deletePostDraft, getPostDraft, setPostDraft } from "@/lib/post-draft";
+import { clearDevHasRespondedOverride } from "@/lib/prompt-store";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -37,6 +39,7 @@ interface CreatePostProps {
   promptId?: string;
   promptText?: string;
   promptDate?: string;
+  existingPost?: Post;
   onPosted?: (created: Post) => void;
 }
 
@@ -123,9 +126,14 @@ async function uploadPostPhoto(params: { userId: string; uri: string }) {
   return filePath;
 }
 
-export function CreatePost({ promptId, promptText, promptDate, onPosted }: CreatePostProps) {
+export function CreatePost({ promptId, promptText, promptDate, existingPost, onPosted }: CreatePostProps) {
+  // #region agent log
+  console.log('[DEBUG H3] CreatePost rendered', { promptId, promptText: promptText?.substring(0, 30), promptDate, hasPromptText: !!promptText, hasExistingPost: !!existingPost });
+  // #endregion
+
   const { user } = useAuth();
   const dailyPrompt = useDailyPrompt();
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
 
   const [step, setStep] = useState<Step>("content");
@@ -136,7 +144,6 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
   const [font, setFont] = useState<FontStyle>("playfair");
   const [fontColor, setFontColor] = useState<FontColor>("white");
   const [fontSize] = useState<FontSize>("large");
-  const [textHighlight, setTextHighlight] = useState<TextHighlight | null>(null);
 
   // Local preview URI for photo background. We upload on submit.
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -151,6 +158,9 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
   // Interactive swipe-back (Style -> Content)
   const swipeX = useRef(new Animated.Value(0)).current;
   const [isSwipingBack, setIsSwipingBack] = useState(false);
+  // Animation for content -> style transition (swipe left)
+  // Start style screen off-screen to the right (screenWidth)
+  const styleSlideX = useRef(new Animated.Value(0)).current;
   const screenWidth = useMemo(() => Dimensions.get("window").width, []);
   const contentRevealOpacity = useMemo(
     () =>
@@ -161,14 +171,53 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
       }),
     [screenWidth, swipeX]
   );
+  
+  // Track if we're transitioning to style (to keep content visible during transition)
+  const [isTransitioningToStyle, setIsTransitioningToStyle] = useState(false);
+  
+  // #region agent log
+  console.log('[DEBUG H6/H7] CreatePost render state', { step, isTransitioningToStyle, willRenderContent: (step === "content" || isTransitioningToStyle), willRenderStyle: (step === "style" && !isTransitioningToStyle) });
+  // #endregion
+  
+  // Track if the step change came from user action (vs draft load)
+  const isUserStepChange = useRef(false);
+  
+  // Initialize style screen position when step changes
+  useEffect(() => {
+    if (step === "style") {
+      // Only animate if this was a user-initiated step change (not draft load)
+      if (isUserStepChange.current) {
+        setIsTransitioningToStyle(true);
+        styleSlideX.setValue(screenWidth);
+        Animated.timing(styleSlideX, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }).start(() => {
+          setIsTransitioningToStyle(false);
+          styleSlideX.setValue(0); // Ensure value is synced after animation
+        });
+      } else {
+        // Coming from draft - no animation, just show directly
+        styleSlideX.setValue(0);
+        setIsTransitioningToStyle(false);
+      }
+      isUserStepChange.current = false;
+    } else {
+      // Reset when going back to content
+      setIsTransitioningToStyle(false);
+      styleSlideX.setValue(0);
+    }
+  }, [step, screenWidth, styleSlideX]);
 
-  // Only prompt responses are gated by time windows (matches web behavior).
+  // Only prompt responses are gated by duplicate prevention (no time windows).
+  // When editing, we skip duplicate check since we delete the old post first.
   const canCreate = useMemo(() => {
     if (!promptId) return true;
-    // Also prevent duplicate prompt responses (DB enforces this via unique constraint).
-    if (dailyPrompt.hasResponded) return false;
-    return dailyPrompt.isPromptAvailable && dailyPrompt.isInResponseWindow && dailyPrompt.isResponseWindowOpen;
-  }, [dailyPrompt.hasResponded, dailyPrompt.isInResponseWindow, dailyPrompt.isPromptAvailable, dailyPrompt.isResponseWindowOpen, promptId]);
+    if (existingPost) return true; // Editing: will delete old post first
+    // Prevent duplicate prompt responses (DB enforces this via unique constraint).
+    return !dailyPrompt.hasResponded;
+  }, [dailyPrompt.hasResponded, promptId, existingPost]);
 
   const previewPost: Post = useMemo(
     () => ({
@@ -180,12 +229,11 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
       font,
       fontColor,
       fontSize,
-      textHighlight: textHighlight ?? undefined,
       photoBackgroundUrl: photoUri ?? undefined,
       expandedText: expandedText.trim() ? expandedText : undefined,
       promptId: promptId ?? undefined,
     }),
-    [background, expandedText, font, fontColor, fontSize, photoUri, promptId, quote, textHighlight]
+    [background, expandedText, font, fontColor, fontSize, photoUri, promptId, quote]
   );
 
   // Used for background swatches: render ONLY the background (no caption letters).
@@ -193,13 +241,11 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
     () => ({
       ...previewPost,
       quote: "",
-      // Ensure highlight doesn’t render over swatches
-      textHighlight: undefined,
     }),
     [previewPost]
   );
 
-  // Load draft (best-effort) per user + promptId.
+  // Load existing post data or draft (best-effort) per user + promptId.
   useEffect(() => {
     const userId = user?.id;
     if (!userId) {
@@ -210,7 +256,27 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
 
     let cancelled = false;
     async function load() {
+      // If editing, load existing post data first
+      if (existingPost) {
+        if (cancelled) return;
+        setQuote(existingPost.quote ?? "");
+        setExpandedText(existingPost.expandedText ?? "");
+        setBackground(existingPost.background ?? "dark");
+        setFont(existingPost.font ?? "playfair");
+        setFontColor(existingPost.fontColor ?? "white");
+        if (existingPost.photoBackgroundUrl) {
+          setPhotoUri(existingPost.photoBackgroundUrl);
+        }
+        setStep("content"); // Start at content step when editing
+        setIsDraftLoaded(true);
+        return;
+      }
+
+      // Otherwise load draft
       const draft = await getPostDraft({ userId: ensuredUserId, promptId });
+      // #region agent log
+      console.log('[DEBUG H6] Draft loaded', { hasDraft: !!draft, draftStep: draft?.step, draftQuote: draft?.quote?.substring(0, 20) });
+      // #endregion
       if (cancelled) return;
       if (draft) {
         setStep(draft.step);
@@ -219,7 +285,6 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
         setBackground(draft.background ?? "dark");
         setFont(draft.font ?? "playfair");
         setFontColor(draft.fontColor ?? "white");
-        setTextHighlight(draft.textHighlight ?? null);
         setPhotoUri(draft.photoUri ?? null);
       }
       setIsDraftLoaded(true);
@@ -229,7 +294,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
     return () => {
       cancelled = true;
     };
-  }, [promptId, user?.id]);
+  }, [promptId, user?.id, existingPost]);
 
   // Auto-save draft (debounced). Draft persists until user deletes it.
   useEffect(() => {
@@ -245,7 +310,6 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
       background === "dark" &&
       font === "playfair" &&
       fontColor === "white" &&
-      textHighlight == null &&
       !photoUri;
 
     if (isEmptyDraft) return;
@@ -262,7 +326,6 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
           background,
           font,
           fontColor,
-          textHighlight,
           photoUri,
           promptId,
           promptDate,
@@ -273,7 +336,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
     return () => {
       if (saveDraftTimerRef.current) clearTimeout(saveDraftTimerRef.current);
     };
-  }, [background, expandedText, font, fontColor, isDraftLoaded, photoUri, promptDate, promptId, quote, step, textHighlight, user?.id]);
+  }, [background, expandedText, font, fontColor, isDraftLoaded, photoUri, promptDate, promptId, quote, step, user?.id]);
 
   async function handleDeleteDraft() {
     const userId = user?.id;
@@ -286,7 +349,6 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
     setBackground("dark");
     setFont("playfair");
     setFontColor("white");
-    setTextHighlight(null);
   }
 
   function renderContentBody(params?: { pointerEvents?: "none" | "auto" }) {
@@ -315,7 +377,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
 
           {!canCreate && promptId ? (
             <Text className="text-center font-mono text-xs text-muted-foreground">
-              Prompt posting is closed (or not yet opened).
+              You've already responded to this prompt.
             </Text>
           ) : null}
 
@@ -363,13 +425,14 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
       submitInFlightRef.current = false;
       return;
     }
-    if (promptId && dailyPrompt.hasResponded) {
-      setErrorMessage("You already responded to today’s prompt.");
+    // When editing, skip duplicate check since we'll delete the old post
+    if (!existingPost && promptId && dailyPrompt.hasResponded) {
+      setErrorMessage("You already responded to today's prompt.");
       submitInFlightRef.current = false;
       return;
     }
-    if (!canCreate) {
-      setErrorMessage("Posting is currently closed for today’s prompt.");
+    if (!existingPost && !canCreate) {
+      setErrorMessage("You've already responded to this prompt.");
       submitInFlightRef.current = false;
       return;
     }
@@ -382,8 +445,23 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
     setErrorMessage(null);
 
     try {
+      // If editing, delete the old post first
+      if (existingPost?.id) {
+        const { error: deleteError } = await supabase.from("yim_posts").delete().eq("id", existingPost.id);
+        if (deleteError) {
+          console.error("[create-post] delete old post failed", deleteError);
+          setErrorMessage("Failed to update post. Please try again.");
+          setIsBusy(false);
+          submitInFlightRef.current = false;
+          return;
+        }
+      }
+
       let photoPath: string | undefined;
       if (photoUri) {
+        // Upload photo (works for local files, data URIs, and signed URLs)
+        // Note: When editing with existing photo (signed URL), this re-uploads it
+        // Could be optimized to reuse storage path, but functional for now
         photoPath = await uploadPostPhoto({ userId: user.id, uri: photoUri });
       }
 
@@ -394,7 +472,6 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
         font,
         fontColor,
         fontSize,
-        textHighlight: textHighlight ?? undefined,
         photoBackgroundPath: photoPath,
         expandedText: expandedText.trim() ? expandedText : undefined,
         promptId: promptId ?? undefined,
@@ -402,6 +479,23 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
       });
 
       if (__DEV__) console.log("[create-post] created", { id: created.id });
+
+      // Dev reset-cycle sets a "has responded" override to false; once we successfully create
+      // the response, clear that override so gating reflects the DB state.
+      if (__DEV__ && user && promptId) {
+        const dateKey = promptDate ?? dailyPrompt.prompt?.prompt_date;
+        if (dateKey) {
+          await clearDevHasRespondedOverride({ userId: user.id, promptId, promptDate: dateKey });
+          await queryClient.invalidateQueries({ queryKey: ["devHasRespondedOverride"] });
+        }
+      }
+
+      // Ensure the feed ungates immediately after posting.
+      if (user && promptId) {
+        await queryClient.invalidateQueries({ queryKey: didRespondQueryKey(user.id, promptId) });
+      }
+      await queryClient.invalidateQueries({ queryKey: ["dailyPrompt"] });
+
       onPosted?.(created);
     } catch (error) {
       console.error("[create-post] submit failed", error);
@@ -418,47 +512,68 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
     }
   }
 
+  // Don't wait for draft to load - render immediately with default content
+  // The draft will be applied once loaded
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-background">
-      {step === "content" ? (
-        <>
-          {renderContentBody()}
+      <View className="flex-1 bg-background" style={{ overflow: "hidden" }}>
+        {/* Content step - always rendered when on content or transitioning to style */}
+        {(step === "content" || isTransitioningToStyle) && (
+          <View className="absolute inset-0 bg-background">
+            {renderContentBody()}
 
-          {/* Bottom action bar (Content step only) */}
-          <View
-            className="absolute bottom-0 left-0 right-0 border-t border-muted bg-background px-4 pt-4"
-            style={{ paddingBottom: Math.max(16, insets.bottom + 12) }}
-          >
-            <Pressable
-              onPress={() => {
-                setErrorMessage(null);
-                setStep("style");
-              }}
-              disabled={isBusy || (promptId ? !canCreate : false)}
-              className={[
-                "w-full items-center justify-center rounded-xl px-4 py-3",
-                isBusy || (promptId ? !canCreate : false) ? "bg-muted" : "bg-primary",
-              ].join(" ")}
-            >
-              <Text className="font-mono text-xs uppercase tracking-wider text-background">Next</Text>
-            </Pressable>
+            {/* Bottom action bar (Content step only) */}
+            {step === "content" && (
+              <View
+                className="absolute bottom-0 left-0 right-0 border-t border-muted bg-background px-4 pt-4"
+                style={{ paddingBottom: Math.max(16, insets.bottom + 12) }}
+              >
+                <Pressable
+                  onPress={() => {
+                    setErrorMessage(null);
+                    isUserStepChange.current = true;
+                    setStep("style");
+                  }}
+                  disabled={isBusy || (promptId ? !canCreate : false)}
+                  className={[
+                    "w-full items-center justify-center rounded-xl px-4 py-3",
+                    isBusy || (promptId ? !canCreate : false) ? "bg-muted" : "bg-primary",
+                  ].join(" ")}
+                >
+                  <Text className="font-mono text-xs uppercase tracking-wider text-background">Next</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
-        </>
-      ) : (
-        <View className="flex-1">
-          {/* Underlay: Content step revealed during swipe */}
+        )}
+
+        {/* Content step revealed during swipe back */}
+        {step === "style" && isSwipingBack && (
           <Animated.View
             className="absolute inset-0"
             pointerEvents="none"
-            style={{ opacity: contentRevealOpacity }}
+            style={{ 
+              opacity: contentRevealOpacity,
+              transform: [{ translateX: Animated.subtract(swipeX, screenWidth) }],
+            }}
           >
             {renderContentBody({ pointerEvents: "none" })}
           </Animated.View>
+        )}
 
-          {/* Overlay: Style step that translates with swipe */}
+        {/* Style step - only render when step is style and not transitioning back */}
+        {step === "style" && !isTransitioningToStyle && (
           <Animated.View
             className="flex-1 bg-background"
-            style={{ transform: [{ translateX: swipeX }] }}
+            style={{ 
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "#0a0a0a",
+              transform: [{ translateX: Animated.add(styleSlideX, swipeX) }]
+            }}
             {...PanResponder.create({
               onMoveShouldSetPanResponder: (_evt, gesture) => {
                 const dx = gesture.dx;
@@ -477,10 +592,15 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
                 const dx = Math.max(0, gesture.dx);
                 const shouldGoBack = dx > screenWidth * 0.33;
                 if (shouldGoBack) {
-                  Animated.timing(swipeX, { toValue: screenWidth, duration: 140, useNativeDriver: true }).start(() => {
+                  // Immediately change step to hide style screen and show content
+                  setStep("content");
+                  Animated.parallel([
+                    Animated.timing(swipeX, { toValue: screenWidth, duration: 140, useNativeDriver: true }),
+                    Animated.timing(styleSlideX, { toValue: screenWidth, duration: 140, useNativeDriver: true }),
+                  ]).start(() => {
                     swipeX.setValue(0);
+                    styleSlideX.setValue(0);
                     setIsSwipingBack(false);
-                    setStep("content");
                   });
                 } else {
                   Animated.spring(swipeX, { toValue: 0, useNativeDriver: true }).start(() => {
@@ -493,13 +613,28 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
                   setIsSwipingBack(false);
                 });
               },
+              onPanResponderGrant: () => {
+                // Reset style slide position when starting swipe back
+                styleSlideX.setValue(0);
+              },
             }).panHandlers}
           >
             {/* Top bar (Style step) */}
             <View className="px-4 pt-6 pb-4">
               <View className="flex-row items-center">
                 <Pressable
-                  onPress={() => setStep("content")}
+                  onPress={() => {
+                    // Immediately change step to hide style screen
+                    setStep("content");
+                    // Animate back to content with swipe right
+                    Animated.parallel([
+                      Animated.timing(swipeX, { toValue: screenWidth, duration: 300, useNativeDriver: true }),
+                      Animated.timing(styleSlideX, { toValue: screenWidth, duration: 300, useNativeDriver: true }),
+                    ]).start(() => {
+                      swipeX.setValue(0);
+                      styleSlideX.setValue(0);
+                    });
+                  }}
                   className="h-11 w-11 items-center justify-center"
                   accessibilityRole="button"
                   accessibilityLabel="Back"
@@ -522,7 +657,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
               </View>
             </View>
 
-            <ScrollView className="flex-1" contentContainerClassName="px-4 pb-28">
+            <ScrollView className="flex-1" style={{ flex: 1 }} contentContainerClassName="px-4 pb-28">
             <YimPost
               post={previewPost}
               editableQuote
@@ -535,7 +670,7 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
             <View className="mt-6 gap-3">
               <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Background</Text>
 
-              {/* Order: left→right, top→bottom. First row should contain 8 options (7 image + photo). */}
+              {/* First row: Image backgrounds (7 items) */}
               <View className="flex-row flex-wrap gap-2">
                 {IMAGE_BACKGROUNDS.map(({ key }) => (
                   <Pressable
@@ -565,17 +700,9 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
                     </View>
                   </Pressable>
                 ))}
-
-                <Pressable
-                  onPress={() => void handlePickPhoto()}
-                  disabled={isBusy}
-                  className="h-12 w-12 items-center justify-center rounded-xl border border-muted bg-card"
-                >
-                  <Text className="font-mono text-xs text-foreground">+</Text>
-                </Pressable>
               </View>
 
-              {/* Second row: 5 gradients */}
+              {/* Second row: Gradients + Add Picture button at bottom right */}
               <View className="flex-row flex-wrap gap-2">
                 {GRADIENT_BACKGROUNDS.map((bg) => (
                   <Pressable
@@ -605,6 +732,15 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
                     </View>
                   </Pressable>
                 ))}
+                
+                {/* Add Picture button at bottom right */}
+                <Pressable
+                  onPress={() => void handlePickPhoto()}
+                  disabled={isBusy}
+                  className="h-12 w-12 items-center justify-center rounded-xl border border-muted bg-card"
+                >
+                  <Text className="font-mono text-xs text-foreground">+</Text>
+                </Pressable>
               </View>
             </View>
 
@@ -656,38 +792,6 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
               </View>
             </View>
 
-            {/* Highlight */}
-            <View className="mt-6 gap-3">
-              <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Text Highlight</Text>
-              <View className="flex-row gap-2">
-                {(["white", "black"] as TextHighlight[]).map((h) => (
-                  <Pressable
-                    key={h}
-                    onPress={() => setTextHighlight((prev) => (prev === h ? null : h))}
-                    className={[
-                      "rounded-xl border px-3 py-2",
-                      textHighlight === h ? "border-primary bg-primary" : "border-muted bg-card",
-                    ].join(" ")}
-                  >
-                    <Text className={textHighlight === h ? "font-mono text-xs text-background" : "font-mono text-xs text-foreground"}>
-                      {h}
-                    </Text>
-                  </Pressable>
-                ))}
-                <Pressable
-                  onPress={() => setTextHighlight(null)}
-                  className={[
-                    "rounded-xl border px-3 py-2",
-                    !textHighlight ? "border-primary bg-primary" : "border-muted bg-card",
-                  ].join(" ")}
-                >
-                  <Text className={!textHighlight ? "font-mono text-xs text-background" : "font-mono text-xs text-foreground"}>
-                    none
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-
             {!!errorMessage ? <Text className="mt-6 font-mono text-xs text-destructive">{errorMessage}</Text> : null}
           </ScrollView>
 
@@ -704,13 +808,12 @@ export function CreatePost({ promptId, promptText, promptDate, onPosted }: Creat
                 isBusy || !isValid || !canCreate ? "bg-muted" : "bg-primary",
               ].join(" ")}
             >
-              {isBusy ? <ActivityIndicator /> : <Text className="font-mono text-xs uppercase tracking-wider text-background">Post</Text>}
+              {isBusy ? <ActivityIndicator /> : <Text className="font-mono text-xs uppercase tracking-wider text-background">Save</Text>}
             </Pressable>
           </View>
           </Animated.View>
-        </View>
-      )}
-
+        )}
+      </View>
     </KeyboardAvoidingView>
   );
 }

@@ -1,6 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 
-import type { BackgroundType, FontColor, FontStyle, TextHighlight } from "@/components/posts/yim-post";
+import type { BackgroundType, FontColor, FontStyle } from "@/components/posts/yim-post";
 
 export type PostDraftV1 = {
   v: 1;
@@ -11,7 +11,6 @@ export type PostDraftV1 = {
   background: BackgroundType;
   font: FontStyle;
   fontColor: FontColor;
-  textHighlight: TextHighlight | null;
   photoUri: string | null;
   promptId?: string;
   promptDate?: string;

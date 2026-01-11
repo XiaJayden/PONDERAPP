@@ -45,7 +45,7 @@ function addDaysToIsoDate(isoDate: string, deltaDays: number) {
   return isoDateFromYmd({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() });
 }
 
-function getPartsInTimeZone(date: Date, timeZone: string): DateParts {
+export function getPartsInTimeZone(date: Date, timeZone: string): DateParts {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
     hour12: false,

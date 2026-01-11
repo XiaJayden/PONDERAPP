@@ -5,7 +5,9 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { PromptPopup } from "@/components/prompts/prompt-popup";
 import { useDailyPrompt } from "@/hooks/useDailyPrompt";
-import { clearPromptPopupShown, clearUserPromptOpenTime, setDevHasRespondedOverride } from "@/lib/prompt-store";
+import { clearPromptPopupShown, setDevHasRespondedOverride } from "@/lib/prompt-store";
+import { type Phase } from "@/lib/phase";
+import { supabase } from "@/lib/supabase";
 import { getTodayPacificIsoDate } from "@/lib/timezone";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -15,6 +17,9 @@ type DevToolsContextValue = {
   closePromptPopup: () => void;
 
   resetCycle: () => Promise<void>;
+
+  phaseOverride: Phase | null;
+  setPhaseOverride: (phase: Phase | null) => void;
 };
 
 const DevToolsContext = createContext<DevToolsContextValue | null>(null);
@@ -34,14 +39,13 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
 
   const [isPromptPopupVisible, setIsPromptPopupVisible] = useState(false);
+  const [phaseOverride, setPhaseOverride] = useState<Phase | null>(null);
 
   const openPromptPopup = useCallback(() => {
     if (!dailyPrompt.prompt) {
       Alert.alert("No prompt available", "There is no daily prompt to respond to right now.");
       return;
     }
-    // In the single-login cycle, opening the prompt is what starts the 15-min window.
-    void dailyPrompt.markPromptOpened();
     setIsPromptPopupVisible(true);
   }, [dailyPrompt.prompt]);
 
@@ -49,19 +53,45 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
 
   const resetCycle = useCallback(async () => {
     if (!__DEV__) return;
-    if (!user?.id) return;
-    if (!dailyPrompt.prompt) return;
+    if (!user?.id) {
+      console.log("[resetCycle] No user, skipping");
+      return;
+    }
+    if (!dailyPrompt.prompt) {
+      console.log("[resetCycle] No prompt available, skipping");
+      return;
+    }
+
+    console.log("[resetCycle] Starting reset", { userId: user.id, promptId: dailyPrompt.prompt.id });
 
     setIsPromptPopupVisible(false);
     const prompt = dailyPrompt.prompt;
     const todayPacific = getTodayPacificIsoDate();
 
-    await clearUserPromptOpenTime({ userId: user.id, promptId: prompt.id, promptDate: prompt.prompt_date });
+    // Delete any existing post for this prompt so the user can re-post (dev testing only).
+    // Use .select() to see how many rows were affected.
+    const { data: deletedRows, error: deleteError } = await supabase
+      .from("yim_posts")
+      .delete()
+      .eq("author_id", user.id)
+      .eq("prompt_id", prompt.id)
+      .select("id");
+
+    if (deleteError) {
+      console.warn("[resetCycle] Failed to delete existing post", deleteError);
+      Alert.alert("Reset failed", `Could not delete existing post: ${deleteError.message}`);
+      return;
+    }
+
+    console.log("[resetCycle] Delete result", { deletedCount: deletedRows?.length ?? 0, promptId: prompt.id });
+
     await clearPromptPopupShown({ userId: user.id, promptId: prompt.id, dateKey: todayPacific });
     await setDevHasRespondedOverride({ userId: user.id, promptId: prompt.id, promptDate: prompt.prompt_date, value: false });
 
     // Refresh any cached data for the cycle.
     await queryClient.invalidateQueries();
+
+    console.log("[resetCycle] Complete");
   }, [dailyPrompt.prompt, queryClient, user?.id]);
 
   const value = useMemo<DevToolsContextValue>(
@@ -70,12 +100,16 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
       openPromptPopup,
       closePromptPopup,
       resetCycle,
+      phaseOverride,
+      setPhaseOverride,
     }),
     [
       closePromptPopup,
       isPromptPopupVisible,
       openPromptPopup,
       resetCycle,
+      phaseOverride,
+      setPhaseOverride,
     ]
   );
 
@@ -90,7 +124,13 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
           prompt={dailyPrompt.prompt}
           onClose={closePromptPopup}
           onRespond={() => {
+            // #region agent log
+            console.log('[DEBUG H1] onRespond called', { promptId: dailyPrompt.prompt?.id, promptText: dailyPrompt.prompt?.prompt_text?.substring(0, 30), promptDate: dailyPrompt.prompt?.prompt_date, hasPrompt: !!dailyPrompt.prompt });
+            // #endregion
             closePromptPopup();
+            // #region agent log
+            console.log('[DEBUG H1] after closePromptPopup, navigating to create');
+            // #endregion
             router.replace({
               pathname: "/(tabs)/create",
               params: {
@@ -99,6 +139,9 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
                 promptDate: dailyPrompt.prompt!.prompt_date,
               },
             });
+            // #region agent log
+            console.log('[DEBUG H1] router.replace called');
+            // #endregion
           }}
         />
       ) : null}
