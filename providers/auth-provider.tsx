@@ -139,11 +139,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function signIn(email: string, password: string) {
     setErrorMessage(null);
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       console.error("[auth] signIn failed", error);
       setErrorMessage(error.message);
       throw error;
+    }
+
+    // Debug: Log the user's email confirmation status
+    if (__DEV__) {
+      console.log("[auth] signIn success", {
+        userId: data.user?.id,
+        email: data.user?.email,
+        email_confirmed_at: data.user?.email_confirmed_at,
+        isEmailConfirmed: Boolean(data.user?.email_confirmed_at),
+      });
+    }
+
+    // Check if email is not confirmed and show helpful message
+    if (!data.user?.email_confirmed_at) {
+      console.warn("[auth] User logged in but email not confirmed");
+      setErrorMessage("Please confirm your email before logging in. Check your inbox for the verification link.");
+      // Sign out since they can't proceed without email confirmation
+      await supabase.auth.signOut();
+      throw new Error("Email not confirmed");
     }
   }
 

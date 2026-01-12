@@ -5,6 +5,7 @@ const PUBLIC_PATHS = new Set<string>([
   "/",
   "/api/login",
   "/api/logout",
+  "/auth/callback",
 ]);
 
 export function middleware(req: NextRequest) {
