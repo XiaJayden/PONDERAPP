@@ -120,8 +120,28 @@ export async function createPrompt(formData: FormData) {
   const maxOrder = maxOrderRows?.[0]?.display_order ?? null;
   const display_order = (typeof maxOrder === "number" && Number.isFinite(maxOrder) ? maxOrder : 0) + 1;
 
-  const maxDate = (maxDateRows?.[0]?.prompt_date ?? "").trim();
-  const prompt_date = maxDate ? addDaysToISODate(maxDate, 1) : addDaysToISODate(formatISODateUTC(new Date()), 1);
+  // Get the max prompt_date, or use today as fallback
+  const maxDateRaw = maxDateRows?.[0]?.prompt_date;
+  const maxDate = typeof maxDateRaw === "string" && maxDateRaw.trim().length > 0 ? maxDateRaw.trim() : null;
+  
+  // Calculate prompt_date: if we have existing prompts, add 1 day to the latest; otherwise use tomorrow
+  let prompt_date: string;
+  if (maxDate) {
+    try {
+      prompt_date = addDaysToISODate(maxDate, 1);
+    } catch (error) {
+      // If date calculation fails, fall back to tomorrow
+      prompt_date = addDaysToISODate(formatISODateUTC(new Date()), 1);
+    }
+  } else {
+    // No existing prompts, use tomorrow
+    prompt_date = addDaysToISODate(formatISODateUTC(new Date()), 1);
+  }
+
+  // Validate prompt_date before insert (must be YYYY-MM-DD format)
+  if (!prompt_date || prompt_date.length !== 10 || !/^\d{4}-\d{2}-\d{2}$/.test(prompt_date)) {
+    throw new Error(`Invalid prompt_date calculated: ${prompt_date}. Expected YYYY-MM-DD format.`);
+  }
 
   const { error } = await supabaseAdmin.from("daily_prompts").insert({
     prompt_text,

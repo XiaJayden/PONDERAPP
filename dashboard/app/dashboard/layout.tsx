@@ -22,6 +22,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <Link className="hover:text-white" href="/dashboard/explicit-metrics">
                 Explicit Metrics
               </Link>
+              <Link className="hover:text-white" href="/dashboard/feedback">
+                Feedback
+              </Link>
               <Link className="hover:text-white" href="/dashboard/performance">
                 Performance
               </Link>

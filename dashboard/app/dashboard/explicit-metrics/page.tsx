@@ -1,5 +1,8 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
+// Disable caching - always fetch fresh data
+export const dynamic = "force-dynamic";
+
 type FeedbackRow = {
   id: string;
   user_id: string | null;
