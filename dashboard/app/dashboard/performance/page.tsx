@@ -114,12 +114,18 @@ export default async function PerformancePage() {
     activeUserSet.size > 0 ? ((postedUserSet.size / activeUserSet.size) * 100).toFixed(1) : "0.0";
 
   // 2. Response Depth: Average word count from posts
-  const { data: postsWithWordCount } = await supabaseAdmin
-    .from("yim_posts")
-    .select("word_count")
-    .not("word_count", "is", null);
+  // Note: word_count column may not exist in all environments - handle gracefully
+  let wordCounts: number[] = [];
+  try {
+    const { data: postsWithWordCount } = await supabaseAdmin
+      .from("yim_posts")
+      .select("word_count")
+      .not("word_count", "is", null) as { data: Array<{ word_count: number | null }> | null };
 
-  const wordCounts = (postsWithWordCount ?? []).map((p: { word_count: number | null }) => p.word_count ?? 0).filter((w: number) => w > 0);
+    wordCounts = (postsWithWordCount ?? []).map((p) => p.word_count ?? 0).filter((w) => w > 0);
+  } catch {
+    // Column doesn't exist yet - metrics will show 0
+  }
   const avgWordCount = wordCounts.length > 0 ? Math.round(wordCounts.reduce((a: number, b: number) => a + b, 0) / wordCounts.length) : 0;
   const medianWordCount =
     wordCounts.length > 0
