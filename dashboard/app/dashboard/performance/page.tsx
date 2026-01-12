@@ -1,5 +1,8 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
+// Disable caching - always fetch fresh data
+export const dynamic = "force-dynamic";
+
 function isoSince(days: number) {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - days);
@@ -78,6 +81,121 @@ export default async function PerformancePage() {
     })
   );
 
+  // KPI Calculations
+  const todayIso = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const todayStart = `${todayIso}T00:00:00Z`;
+
+  // 1. Prompt Completion Rate: % of active users who submitted a response today
+  const [activeUsersToday, usersWhoPostedToday] = await Promise.all([
+    supabaseAdmin
+      .from("user_events")
+      .select("user_id")
+      .gte("created_at", todayStart)
+      .eq("event_type", "app_open")
+      .not("user_id", "is", null),
+    supabaseAdmin
+      .from("user_events")
+      .select("user_id")
+      .gte("created_at", todayStart)
+      .eq("event_type", "post_submit")
+      .not("user_id", "is", null),
+  ]);
+
+  const activeUserSet = new Set<string>();
+  (activeUsersToday.data ?? []).forEach((row) => {
+    if (row.user_id) activeUserSet.add(row.user_id);
+  });
+  const postedUserSet = new Set<string>();
+  (usersWhoPostedToday.data ?? []).forEach((row) => {
+    if (row.user_id) postedUserSet.add(row.user_id);
+  });
+
+  const promptCompletionRate =
+    activeUserSet.size > 0 ? ((postedUserSet.size / activeUserSet.size) * 100).toFixed(1) : "0.0";
+
+  // 2. Response Depth: Average word count from posts
+  // Note: word_count column may not exist in all environments - handle gracefully
+  let wordCounts: number[] = [];
+  try {
+    const { data: postsWithWordCount } = await supabaseAdmin
+      .from("yim_posts")
+      .select("word_count")
+      .not("word_count", "is", null) as { data: Array<{ word_count: number | null }> | null };
+
+    wordCounts = (postsWithWordCount ?? []).map((p) => p.word_count ?? 0).filter((w) => w > 0);
+  } catch {
+    // Column doesn't exist yet - metrics will show 0
+  }
+  const avgWordCount = wordCounts.length > 0 ? Math.round(wordCounts.reduce((a: number, b: number) => a + b, 0) / wordCounts.length) : 0;
+  const medianWordCount =
+    wordCounts.length > 0
+      ? (() => {
+          const sorted = [...wordCounts].sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          return sorted.length % 2 === 0 ? Math.round((sorted[mid - 1] + sorted[mid]) / 2) : sorted[mid];
+        })()
+      : 0;
+
+  // 3. Lurker Rate: Users who opened app but never posted
+  const [allAppOpenUsers, allPostUsers] = await Promise.all([
+    supabaseAdmin
+      .from("user_events")
+      .select("user_id")
+      .eq("event_type", "app_open")
+      .not("user_id", "is", null),
+    supabaseAdmin
+      .from("user_events")
+      .select("user_id")
+      .eq("event_type", "post_submit")
+      .not("user_id", "is", null),
+  ]);
+
+  const appOpenUserSet = new Set<string>();
+  (allAppOpenUsers.data ?? []).forEach((row) => {
+    if (row.user_id) appOpenUserSet.add(row.user_id);
+  });
+  const postUserSet = new Set<string>();
+  (allPostUsers.data ?? []).forEach((row) => {
+    if (row.user_id) postUserSet.add(row.user_id);
+  });
+
+  const lurkers = Array.from(appOpenUserSet).filter((uid) => !postUserSet.has(uid));
+  const lurkerRate = appOpenUserSet.size > 0 ? ((lurkers.length / appOpenUserSet.size) * 100).toFixed(1) : "0.0";
+
+  // 4. Social Acknowledgement Rate: Posts with likes / Total posts
+  const [{ count: totalPosts }] = await Promise.all([
+    supabaseAdmin.from("yim_posts").select("id", { count: "exact", head: true }),
+  ]);
+
+  // Get distinct posts with likes
+  const { data: distinctLikedPosts } = await supabaseAdmin.from("post_likes").select("post_id");
+  const likedPostSet = new Set<string>();
+  (distinctLikedPosts ?? []).forEach((row: { post_id: string | number | null }) => {
+    if (row.post_id) likedPostSet.add(String(row.post_id));
+  });
+
+  const socialAckRate = (totalPosts ?? 0) > 0 ? (((likedPostSet.size / (totalPosts ?? 1)) * 100).toFixed(1)) : "0.0";
+
+  // 5. Explicit Prompt Rating: Average rating from user_feedback where prompt_id is not null
+  const { data: promptRatings } = await supabaseAdmin
+    .from("user_feedback")
+    .select("rating")
+    .not("prompt_id", "is", null)
+    .not("rating", "is", null);
+
+  const ratings = (promptRatings ?? []).map((r: { rating: number | null }) => r.rating).filter((r: number | null): r is number => typeof r === "number" && r > 0);
+  const avgPromptRating = ratings.length > 0 ? (ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length).toFixed(2) : "—";
+
+  // 6. Question Sharing Rate: would_share = true / Total feedback submissions with prompt_id
+  const { data: shareFeedback } = await supabaseAdmin
+    .from("user_feedback")
+    .select("would_share")
+    .not("prompt_id", "is", null);
+
+  const totalShareFeedback = shareFeedback?.length ?? 0;
+  const wouldShareCount = (shareFeedback ?? []).filter((f: { would_share: boolean | null }) => f.would_share === true).length;
+  const questionSharingRate = totalShareFeedback > 0 ? (((wouldShareCount / totalShareFeedback) * 100).toFixed(1)) : "0.0";
+
   return (
     <div className="space-y-6">
       <div>
@@ -120,7 +238,67 @@ export default async function PerformancePage() {
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="text-xs text-white/60">Notes</div>
           <div className="mt-1 text-sm text-white/70">
-            Response “rate” below is total posts per prompt (not distinct users).
+            Response &quot;rate&quot; below is total posts per prompt (not distinct users).
+          </div>
+        </div>
+      </div>
+
+      {/* KPI Section */}
+      <div>
+        <h2 className="mb-4 text-lg font-semibold">Key Performance Indicators</h2>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {/* 1. Prompt Completion Rate */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs text-white/60">Prompt Completion Rate</div>
+            <div className="mt-1 text-2xl font-semibold">{promptCompletionRate}%</div>
+            <div className="mt-2 text-xs text-white/50">
+              {postedUserSet.size} of {activeUserSet.size} active users posted today
+            </div>
+          </div>
+
+          {/* 2. Response Depth */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs text-white/60">Response Depth</div>
+            <div className="mt-1 text-2xl font-semibold">{avgWordCount}</div>
+            <div className="mt-2 text-xs text-white/50">
+              Avg: {avgWordCount} words | Median: {medianWordCount} words
+            </div>
+          </div>
+
+          {/* 3. Lurker Rate */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs text-white/60">Lurker Rate</div>
+            <div className="mt-1 text-2xl font-semibold">{lurkerRate}%</div>
+            <div className="mt-2 text-xs text-white/50">
+              {lurkers.length} users opened app but never posted
+            </div>
+          </div>
+
+          {/* 4. Social Acknowledgement Rate */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs text-white/60">Social Acknowledgement Rate</div>
+            <div className="mt-1 text-2xl font-semibold">{socialAckRate}%</div>
+            <div className="mt-2 text-xs text-white/50">
+              {likedPostSet.size} of {totalPosts ?? 0} posts have likes
+            </div>
+          </div>
+
+          {/* 5. Explicit Prompt Rating */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs text-white/60">Explicit Prompt Rating</div>
+            <div className="mt-1 text-2xl font-semibold">{avgPromptRating}</div>
+            <div className="mt-2 text-xs text-white/50">
+              Average rating: {avgPromptRating} / 5.0 ({ratings.length} ratings)
+            </div>
+          </div>
+
+          {/* 6. Question Sharing Rate */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs text-white/60">Question Sharing Rate</div>
+            <div className="mt-1 text-2xl font-semibold">{questionSharingRate}%</div>
+            <div className="mt-2 text-xs text-white/50">
+              {wouldShareCount} of {totalShareFeedback} users would share
+            </div>
           </div>
         </div>
       </div>

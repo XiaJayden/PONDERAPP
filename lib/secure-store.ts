@@ -15,7 +15,6 @@ export const secureStoreAdapter = {
   async getItem(key: string) {
     try {
       const value = await SecureStore.getItemAsync(key);
-      if (__DEV__) console.log("[secure-store] getItem", { key, hasValue: !!value });
       return value;
     } catch (error) {
       console.warn("[secure-store] getItem failed", { key, error });

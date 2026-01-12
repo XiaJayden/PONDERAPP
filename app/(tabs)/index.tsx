@@ -1,98 +1,65 @@
 import { router } from "expo-router";
 import { Bell } from "lucide-react-native";
-import React, { useEffect, useMemo, useState } from "react";
-import { Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import React, { useState } from "react";
+import { Alert, Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useQuery } from "@tanstack/react-query";
 
 import { ExpandedPostModal } from "@/components/posts/expanded-post-modal";
 import { PostFooterActions, PostHeader } from "@/components/posts/post-chrome";
+import { BlurredPost } from "@/components/posts/blurred-post";
 import { YimPost, type Post } from "@/components/posts/yim-post";
-import { PostingWindowBanner } from "@/components/prompts/posting-window";
-import { PromptCard } from "@/components/prompts/prompt-card";
+import { AnsweringStateCountdown } from "@/components/dev/answering-countdown";
 import { PromptPopup } from "@/components/prompts/prompt-popup";
-import { useDailyPrompt } from "@/hooks/useDailyPrompt";
+import { dailyPromptForDateQueryKey, fetchPromptForDate, useDailyPrompt } from "@/hooks/useDailyPrompt";
+import { usePhase } from "@/hooks/usePhase";
 import { useYimFeed } from "@/hooks/useYimFeed";
-import { markPromptPopupShown, wasPromptPopupShown } from "@/lib/prompt-store";
-import { getTodayPacificIsoDate } from "@/lib/timezone";
-import { useAuth } from "@/providers/auth-provider";
+import { useActivity } from "@/hooks/useActivity";
+import { useDevTools } from "@/providers/dev-tools-provider";
+
+function formatHms(ms: number | null) {
+  const totalSeconds = Math.max(0, Math.floor((ms ?? 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
 
 export default function FeedScreen() {
-  const { user } = useAuth();
   const dailyPrompt = useDailyPrompt();
-  const feed = useYimFeed();
+  const devTools = useDevTools();
+  const feed = useYimFeed(devTools.showAllPosts);
+  const phase = usePhase(devTools.phaseOverride);
+  const { unreadCount } = useActivity();
 
-  const [showPromptPopup, setShowPromptPopup] = useState(false);
   const [expandedPost, setExpandedPost] = useState<Post | null>(null);
+  const [isPromptPopupVisible, setIsPromptPopupVisible] = useState(false);
 
-  const todayPacific = useMemo(() => getTodayPacificIsoDate(), []);
+  // For posting day: check if user responded to today's prompt
+  // For viewing day: use dedicated query to check if user has a post for yesterday
+  const hasAnsweredToday = phase.phase === "viewing" 
+    ? feed.hasRespondedToViewingDay 
+    : dailyPrompt.hasAnsweredToday;
 
-  // Auto-show prompt popup once per day when prompt becomes available and user hasn't responded.
-  useEffect(() => {
-    const userId = user?.id;
-    if (!userId) return;
-    const ensuredUserId = userId;
-    if (dailyPrompt.isLoading) return;
-    if (!dailyPrompt.prompt) return;
-    if (!dailyPrompt.isPromptAvailable) return;
-    if (dailyPrompt.hasResponded) return;
+  // On viewing day, we show posts from the previous posting day's prompt
+  // Use the same yesterdayDateKey as the feed to ensure consistency
+  const viewingDayPromptDate = phase.phase === "viewing" ? feed.yesterdayDateKey : null;
 
-    let cancelled = false;
+  const viewingDayPromptQ = useQuery({
+    queryKey: viewingDayPromptDate ? dailyPromptForDateQueryKey(viewingDayPromptDate) : ["viewingDayPrompt", "disabled"],
+    queryFn: () => fetchPromptForDate(viewingDayPromptDate!),
+    enabled: !!viewingDayPromptDate,
+  });
 
-    async function check() {
-      const shown = await wasPromptPopupShown({
-        userId: ensuredUserId,
-        promptId: dailyPrompt.prompt!.id,
-        dateKey: todayPacific,
-      });
-      if (cancelled) return;
-      if (shown) return;
-      setShowPromptPopup(true);
-      await markPromptPopupShown({ userId: ensuredUserId, promptId: dailyPrompt.prompt!.id, dateKey: todayPacific });
-    }
+  const viewingDayPrompt = viewingDayPromptQ.data ?? null;
 
-    void check();
-    return () => {
-      cancelled = true;
-    };
-  }, [dailyPrompt.hasResponded, dailyPrompt.isLoading, dailyPrompt.isPromptAvailable, dailyPrompt.prompt, todayPacific, user]);
-
-  const arePostsVisible = useMemo(() => {
-    // Web behavior: before 12:30pm PT, hide posts (but still show prompt card).
-    if (!dailyPrompt.prompt) return true;
-    return dailyPrompt.timeUntilRelease === null;
-  }, [dailyPrompt.prompt, dailyPrompt.timeUntilRelease]);
-
-  const shouldShowPostingBanner = useMemo(() => {
-    if (!dailyPrompt.prompt) return false;
-    if (dailyPrompt.isInResponseWindow) return true;
-    // Also show when counting down to release.
-    return dailyPrompt.timeUntilRelease !== null && dailyPrompt.timeUntilRelease > 0;
-  }, [dailyPrompt.isInResponseWindow, dailyPrompt.prompt, dailyPrompt.timeUntilRelease]);
+  // Fallback: if no viewing day prompt, use the daily prompt (current cycle's prompt)
+  // This ensures we always show SOME prompt on viewing day
+  const displayPrompt = viewingDayPrompt ?? dailyPrompt.prompt;
 
   return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-1">
-        {/* Prompt Popup */}
-        {dailyPrompt.prompt ? (
-          <PromptPopup
-            isVisible={showPromptPopup}
-            prompt={dailyPrompt.prompt}
-            onClose={() => setShowPromptPopup(false)}
-            onRespond={() => {
-              setShowPromptPopup(false);
-              void dailyPrompt.markPromptOpened();
-              router.replace({
-                pathname: "/(tabs)/create",
-                params: {
-                  promptId: dailyPrompt.prompt!.id,
-                  promptText: dailyPrompt.prompt!.prompt_text,
-                  promptDate: dailyPrompt.prompt!.prompt_date,
-                },
-              });
-            }}
-          />
-        ) : null}
-
         {/* Expanded Post */}
         <ExpandedPostModal
           isVisible={!!expandedPost}
@@ -101,18 +68,34 @@ export default function FeedScreen() {
           onUpdated={() => void feed.refetch(true)}
         />
 
-        {shouldShowPostingBanner ? (
-          <PostingWindowBanner
-            isActive={dailyPrompt.isInResponseWindow}
-            timeRemainingMs={dailyPrompt.timeUntilDeadline}
-            timeUntilReleaseMs={dailyPrompt.timeUntilRelease}
-            isResponseWindowOpen={dailyPrompt.isResponseWindowOpen}
+        {/* Prompt Popup - works for both posting and viewing day */}
+        {(phase.phase === "posting" ? dailyPrompt.prompt : displayPrompt) ? (
+          <PromptPopup
+            isVisible={isPromptPopupVisible}
+            prompt={(phase.phase === "posting" ? dailyPrompt.prompt : displayPrompt)!}
+            onClose={() => setIsPromptPopupVisible(false)}
+            onRespond={() => {
+              const activePrompt = phase.phase === "posting" ? dailyPrompt.prompt : displayPrompt;
+              // For viewing day, use yesterdayDateKey to ensure the post appears in the feed
+              // (even if the prompt's own date is different)
+              const promptDateToUse = phase.phase === "viewing" ? feed.yesterdayDateKey : activePrompt!.prompt_date;
+              
+              setIsPromptPopupVisible(false);
+              router.replace({
+                pathname: "/(tabs)/create",
+                params: {
+                  promptId: activePrompt!.id,
+                  promptText: activePrompt!.prompt_text,
+                  promptDate: promptDateToUse,
+                },
+              });
+            }}
           />
         ) : null}
 
         <ScrollView
           className="flex-1"
-          contentContainerClassName={["px-4 pb-24", shouldShowPostingBanner ? "pt-16" : "pt-0"].join(" ")}
+          contentContainerClassName="px-4 pb-24"
           refreshControl={<RefreshControl refreshing={feed.isRefreshing} onRefresh={() => void feed.refetch()} />}
         >
           {/* Header */}
@@ -122,8 +105,8 @@ export default function FeedScreen() {
 
             <View className="flex-1 items-center">
               <Image
-                source={require("../../assets/images/ponder logo.png")}
-                accessibilityLabel="pondr"
+                source={require("../../assets/images/ponder-logo.png")}
+                accessibilityLabel="PONDER"
                 style={{ width: 200, height: 74, resizeMode: "contain", marginBottom: -14 }}
               />
             </View>
@@ -137,57 +120,161 @@ export default function FeedScreen() {
                 style={{ marginTop: 12, marginRight: 8 }}
               >
                 <Bell color="hsl(60 9% 98%)" size={22} />
+                {unreadCount > 0 && (
+                  <View
+                    className="absolute right-0 top-1 h-4 w-4 items-center justify-center rounded-full bg-primary"
+                    style={{ marginRight: 2 }}
+                  >
+                    <Text className="font-mono text-[8px] font-bold text-background">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </Text>
+                  </View>
+                )}
               </Pressable>
             </View>
           </View>
 
-          {/* Prompt card */}
-          {dailyPrompt.prompt && dailyPrompt.isPromptAvailable && !showPromptPopup ? (
-            <View className="mt-6">
-              <PromptCard
-                prompt={dailyPrompt.prompt}
-                onOpen={() => setShowPromptPopup(true)}
-                onRespond={() => {
-                  void dailyPrompt.markPromptOpened();
-                  router.replace({
-                    pathname: "/(tabs)/create",
-                    params: {
-                      promptId: dailyPrompt.prompt!.id,
-                      promptText: dailyPrompt.prompt!.prompt_text,
-                      promptDate: dailyPrompt.prompt!.prompt_date,
-                    },
-                  });
-                }}
-              />
-            </View>
-          ) : null}
+          {/* Phase-based UI */}
+          {phase.phase === "posting" ? (
+            /* POSTING DAY */
+            <>
+              {/* Question Container */}
+              {dailyPrompt.prompt ? (
+                <Pressable
+                  onPress={() => setIsPromptPopupVisible(true)}
+                  className="mt-6 rounded-2xl border border-muted bg-card p-5"
+                  accessibilityRole="button"
+                  accessibilityLabel="Today's prompt"
+                >
+                  <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Today's PONDER</Text>
+                  <Text className="mt-3 font-playfair text-2xl leading-tight text-foreground">
+                    {dailyPrompt.prompt.prompt_text}
+                  </Text>
 
-          {/* Posts */}
-          <View className="mt-8 gap-6">
-            {!arePostsVisible ? (
-              <View className="items-center justify-center py-10">
-                <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                  Posts release at 12:30pm PT
+                  {!hasAnsweredToday ? (
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        if (!dailyPrompt.prompt) {
+                          Alert.alert("No prompt available", "There is no daily prompt to respond to right now.");
+                          return;
+                        }
+                        devTools.openPromptPopup();
+                      }}
+                      accessibilityRole="button"
+                      className="mt-4 items-center justify-center rounded-xl bg-primary px-4 py-3"
+                    >
+                      <Text className="font-mono text-xs uppercase tracking-wider text-background">Respond Now</Text>
+                    </Pressable>
+                  ) : (
+                    <View className="mt-4 items-center justify-center rounded-xl bg-muted px-4 py-3">
+                      <Text className="font-mono text-xs uppercase tracking-wider text-foreground">You've responded</Text>
+                    </View>
+                  )}
+                </Pressable>
+              ) : dailyPrompt.isLoading ? (
+                <View className="mt-6 rounded-2xl border border-muted bg-card p-5">
+                  <Text className="font-mono text-sm text-muted-foreground">Loading prompt...</Text>
+                </View>
+              ) : (
+                <View className="mt-6 rounded-2xl border border-muted bg-card p-5">
+                  <Text className="font-mono text-sm text-muted-foreground">
+                    No prompt available for {dailyPrompt.cycleDateKey}
+                  </Text>
+                </View>
+              )}
+
+              {/* Countdown Container */}
+              <View className="mt-6">
+                <AnsweringStateCountdown timeUntilReleaseMs={phase.timeRemaining} />
+              </View>
+            </>
+          ) : (
+            /* VIEWING DAY */
+            <>
+              {/* Question Container - clickable like posting day */}
+              {displayPrompt ? (
+                <Pressable
+                  onPress={() => setIsPromptPopupVisible(true)}
+                  className="mt-6 rounded-2xl border border-muted bg-card p-5"
+                  accessibilityRole="button"
+                  accessibilityLabel="Yesterday's prompt"
+                >
+                  <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Yesterday's PONDER</Text>
+                  <Text className="mt-3 font-playfair text-2xl leading-tight text-foreground">
+                    {displayPrompt.prompt_text}
+                  </Text>
+
+                  {!hasAnsweredToday ? (
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        if (!displayPrompt) {
+                          Alert.alert("No prompt available", "There is no prompt to respond to right now.");
+                          return;
+                        }
+                        // Open the prompt popup for viewing day prompt
+                        setIsPromptPopupVisible(true);
+                      }}
+                      accessibilityRole="button"
+                      className="mt-4 items-center justify-center rounded-xl bg-primary px-4 py-3"
+                    >
+                      <Text className="font-mono text-xs uppercase tracking-wider text-background">Respond Now</Text>
+                    </Pressable>
+                  ) : (
+                    <View className="mt-4 items-center justify-center rounded-xl bg-muted px-4 py-3">
+                      <Text className="font-mono text-xs uppercase tracking-wider text-foreground">You've responded</Text>
+                    </View>
+                  )}
+                </Pressable>
+              ) : viewingDayPromptQ.isLoading || dailyPrompt.isLoading ? (
+                <View className="mt-6 rounded-2xl border border-muted bg-card p-5">
+                  <Text className="font-mono text-sm text-muted-foreground">Loading prompt...</Text>
+                </View>
+              ) : (
+                <View className="mt-6 rounded-2xl border border-muted bg-card p-5">
+                  <Text className="font-mono text-sm text-muted-foreground">No prompt available</Text>
+                </View>
+              )}
+
+              {/* Countdown */}
+              <View className="mt-4 items-center">
+                <Text className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {formatHms(phase.timeRemaining)} until next prompt
                 </Text>
               </View>
-            ) : feed.isLoading ? (
-              <View className="items-center justify-center py-10">
-                <Text className="font-mono text-sm text-muted-foreground">Loading posts…</Text>
-              </View>
-            ) : feed.posts.length === 0 ? (
-              <View className="items-center justify-center py-10">
-                <Text className="font-mono text-sm text-muted-foreground">No posts yet. Create your first PONDR.</Text>
-              </View>
-            ) : (
-              feed.posts.map((post) => (
-                <View key={post.id} className="w-full">
-                  <PostHeader post={post} />
-                  <YimPost post={post} onPress={() => setExpandedPost(post)} />
-                  <PostFooterActions />
+            </>
+          )}
+
+          {/* Posts - only show on viewing day */}
+          {phase.phase === "viewing" ? (
+            <View className="mt-8 gap-6">
+              {feed.isLoading ? (
+                <View className="items-center justify-center py-10">
+                  <Text className="font-mono text-sm text-muted-foreground">Loading posts…</Text>
                 </View>
-              ))
-            )}
-          </View>
+              ) : feed.posts.length === 0 ? (
+                <View className="items-center justify-center py-10">
+                  <Text className="font-mono text-sm text-muted-foreground">No posts yet.</Text>
+                </View>
+              ) : hasAnsweredToday ? (
+                feed.posts.map((post) => (
+                  <View key={post.id} className="w-full">
+                    <PostHeader post={post} />
+                    <YimPost post={post} onPress={() => setExpandedPost(post)} />
+                    <PostFooterActions post={post} onCommentPress={() => setExpandedPost(post)} />
+                  </View>
+                ))
+              ) : (
+                feed.posts.map((post) => (
+                  <View key={post.id} className="w-full">
+                    <BlurredPost post={post} />
+                    <PostFooterActions post={post} onCommentPress={() => setExpandedPost(post)} />
+                  </View>
+                ))
+              )}
+            </View>
+          ) : null}
         </ScrollView>
         </View>
       </SafeAreaView>

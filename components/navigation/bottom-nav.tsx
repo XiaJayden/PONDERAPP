@@ -1,12 +1,16 @@
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { router } from "expo-router";
-import { Home, Image as ImageIcon, Plus, User, Users } from "lucide-react-native";
+import { Eye, Home, Image as ImageIcon, Pencil, Plus, User, Users } from "lucide-react-native";
 import React from "react";
-import { Pressable, Text, View } from "react-native";
+import { Alert, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useAuth } from "@/providers/auth-provider";
+import { PostPreviewModal } from "@/components/posts/post-preview-modal";
 import { useDailyPrompt } from "@/hooks/useDailyPrompt";
+import { usePhase } from "@/hooks/usePhase";
+import { useYimFeed } from "@/hooks/useYimFeed";
+import { useAuth } from "@/providers/auth-provider";
+import { useDevTools } from "@/providers/dev-tools-provider";
 
 type TabRouteName = "index" | "friends" | "create" | "gallery" | "profile";
 
@@ -47,12 +51,42 @@ export function BottomNav(props: BottomTabBarProps) {
   const currentRoute = props.state.routes[props.state.index];
   const { user } = useAuth();
   const dailyPrompt = useDailyPrompt();
+  const feed = useYimFeed();
+  const devTools = useDevTools();
+  const phase = usePhase(devTools.phaseOverride);
 
-  // Match web behavior: create is only enabled during the user's response window.
-  const canCreate = !!user && dailyPrompt.isInResponseWindow;
+  const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
+
+  // In the posting/viewing cycle:
+  // - Posting day, before answering: plus opens the prompt popup
+  // - Posting day, after answering: pencil icon allows editing post
+  // - Viewing day, before answering: plus opens the prompt popup (for late response)
+  // - Viewing day, after answering: eye icon previews the viewing day post
+  const isPostingPhase = phase.phase === "posting";
+  
+  // Use appropriate check based on phase
+  const hasAnsweredForPhase = isPostingPhase 
+    ? (!!user && dailyPrompt.hasAnsweredToday)
+    : feed.hasRespondedToViewingDay;
+  
+  // Use appropriate post based on phase
+  const relevantPost = isPostingPhase ? feed.pendingPost : feed.viewingDayPost;
+  
+  const canOpenPrompt = !!user && !!dailyPrompt.prompt;
+  
+  // Posting day + answered = pencil (edit)
+  const showEditButton = hasAnsweredForPhase && isPostingPhase && !!relevantPost;
+  // Viewing day + answered = eye (preview)
+  const showPreviewButton = hasAnsweredForPhase && !isPostingPhase && !!relevantPost;
+  // Not answered = plus (create/respond)
+  const showCreateButton = !hasAnsweredForPhase && canOpenPrompt;
+  
+  const createEnabled = showEditButton || showPreviewButton || showCreateButton;
 
   return (
     <View className="bg-transparent">
+      <PostPreviewModal isVisible={isPreviewOpen} post={relevantPost ?? null} onClose={() => setIsPreviewOpen(false)} />
+
       <View 
         style={{ 
           backgroundColor: "#241E1A",
@@ -75,8 +109,46 @@ export function BottomNav(props: BottomTabBarProps) {
 
           <CreateButton
             isActive={currentRoute.name === "create"}
-            isEnabled={canCreate}
-            onPress={() => router.replace("/(tabs)/create")}
+            isEnabled={createEnabled}
+            variant={showEditButton ? "edit" : showPreviewButton ? "preview" : "create"}
+            onPress={() => {
+              if (showEditButton) {
+                // Navigate to edit existing post (posting day only)
+                if (!relevantPost) {
+                  Alert.alert("No post found", "You haven't submitted today's post yet.");
+                  return;
+                }
+                if (!dailyPrompt.prompt) {
+                  Alert.alert("No prompt available", "There is no daily prompt to respond to right now.");
+                  return;
+                }
+                router.replace({
+                  pathname: "/(tabs)/create",
+                  params: {
+                    promptId: dailyPrompt.prompt.id,
+                    promptText: dailyPrompt.prompt.prompt_text,
+                    promptDate: dailyPrompt.prompt.prompt_date,
+                    postId: relevantPost.id,
+                    edit: "true",
+                  },
+                });
+                return;
+              }
+
+              if (showPreviewButton) {
+                // Show preview of viewing day post (viewing day only)
+                if (!relevantPost) {
+                  Alert.alert("No post found", "You haven't submitted a post yet.");
+                  return;
+                }
+                setIsPreviewOpen(true);
+                return;
+              }
+
+              // Create new post
+              if (!canOpenPrompt) return;
+              devTools.openPromptPopup();
+            }}
           />
 
           <NavButton
@@ -125,8 +197,26 @@ function NavButton({
   );
 }
 
-function CreateButton({ isActive, isEnabled, onPress }: { isActive: boolean; isEnabled: boolean; onPress: () => void }) {
-  // Intentionally “dumb” button: gating happens in BottomNav based on prompt timing.
+function CreateButton({
+  isActive,
+  isEnabled,
+  variant,
+  onPress,
+}: {
+  isActive: boolean;
+  isEnabled: boolean;
+  variant: "create" | "preview" | "edit";
+  onPress: () => void;
+}) {
+  // Intentionally "dumb" button: gating happens in BottomNav based on prompt timing.
+
+  const bgColor = isEnabled
+    ? variant === "edit"
+      ? "hsl(47 96% 53%)" // yellow
+      : variant === "preview"
+        ? "bg-foreground"
+        : "bg-primary"
+    : "bg-muted";
 
   return (
     <Pressable
@@ -135,21 +225,31 @@ function CreateButton({ isActive, isEnabled, onPress }: { isActive: boolean; isE
         onPress();
       }}
       accessibilityRole="button"
-      accessibilityLabel="Create"
+      accessibilityLabel={variant === "edit" ? "Edit" : variant === "preview" ? "Preview" : "Create"}
       accessibilityState={{ selected: isActive, disabled: !isEnabled }}
       className="items-center justify-center"
     >
       <View
-        className={[
-          "relative -mt-10 items-center justify-center rounded-full",
-          isEnabled ? "bg-primary" : "bg-muted",
-        ].join(" ")}
-        style={{ height: 72, width: 72 }}
+        className={["relative -mt-10 items-center justify-center rounded-full", isEnabled ? "" : "bg-muted"].join(" ")}
+        style={{
+          height: 72,
+          width: 72,
+          backgroundColor: isEnabled
+            ? variant === "edit"
+              ? "hsl(47 96% 53%)"
+              : variant === "preview"
+                ? "hsl(60 9% 98%)"
+                : "hsl(82 85% 55%)"
+            : "hsl(0 0% 55%)",
+        }}
       >
-        {getIcon("create", isEnabled ? "hsl(0 0% 4%)" : "hsl(0 0% 55%)")}
-
-        {/* Small pulse dot like web app */}
-        {isEnabled ? <View className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-accent" /> : null}
+        {variant === "edit" ? (
+          <Pencil color={isEnabled ? "hsl(0 0% 4%)" : "hsl(0 0% 55%)"} size={30} />
+        ) : variant === "preview" ? (
+          <Eye color={isEnabled ? "hsl(0 0% 4%)" : "hsl(0 0% 55%)"} size={30} />
+        ) : (
+          getIcon("create", isEnabled ? "hsl(0 0% 4%)" : "hsl(0 0% 55%)")
+        )}
       </View>
     </Pressable>
   );

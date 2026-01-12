@@ -1,4 +1,4 @@
-export const DASH_COOKIE_NAME = "pondr_dash";
+export const DASH_COOKIE_NAME = "PONDER_dash";
 
 export function getDashboardPassword(): string {
   const pw = process.env.DASHBOARD_PASSWORD;

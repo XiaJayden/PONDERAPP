@@ -33,7 +33,19 @@ function parseIsoDateOnly(isoDate: string) {
   return { year: Number(y), month: Number(m), day: Number(d) };
 }
 
-function getPartsInTimeZone(date: Date, timeZone: string): DateParts {
+function isoDateFromYmd(params: { year: number; month: number; day: number }) {
+  return `${params.year}-${pad2(params.month)}-${pad2(params.day)}`;
+}
+
+function addDaysToIsoDate(isoDate: string, deltaDays: number) {
+  const { year, month, day } = parseIsoDateOnly(isoDate);
+  // Use UTC math to avoid local timezone/DST interference.
+  const ms = Date.UTC(year, month - 1, day + deltaDays, 12, 0, 0);
+  const d = new Date(ms);
+  return isoDateFromYmd({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() });
+}
+
+export function getPartsInTimeZone(date: Date, timeZone: string): DateParts {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
     hour12: false,
@@ -122,8 +134,29 @@ export function getPacificTimeForPromptDate(promptDate: string, hour: number, mi
 
 export function getTodayPacificIsoDate(now: Date = new Date()) {
   const parts = getPartsInTimeZone(now, PACIFIC_TZ);
-  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+  return isoDateFromYmd({ year: parts.year, month: parts.month, day: parts.day });
 }
+
+/**
+ * Returns the "cycle date" for a 6AM→6AM Pacific cycle.
+ *
+ * Example:
+ * - If it's 5:30AM PT on Jan 10, the current cycle date is Jan 9.
+ * - If it's 6:01AM PT on Jan 10, the current cycle date is Jan 10.
+ */
+export function getPacificIsoDateForCycleStart(now: Date = new Date(), cycleStartHour: number = 6) {
+  const pacificToday = getTodayPacificIsoDate(now);
+  const parts = getPartsInTimeZone(now, PACIFIC_TZ);
+  if (parts.hour < cycleStartHour) return addDaysToIsoDate(pacificToday, -1);
+  return pacificToday;
+}
+
+export function getPacificIsoDateOffset(now: Date = new Date(), offsetDays: number) {
+  const pacificToday = getTodayPacificIsoDate(now);
+  return addDaysToIsoDate(pacificToday, offsetDays);
+}
+
+
 
 
 

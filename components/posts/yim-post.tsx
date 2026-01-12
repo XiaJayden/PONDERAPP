@@ -1,5 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ImageBackground, Pressable, Text, TextInput, View, type ImageSourcePropType } from "react-native";
 
 export type FontStyle = "bebas" | "playfair" | "archivo" | "marker" | "caveat" | "canela";
@@ -39,6 +39,7 @@ export interface Post {
   authorUsername?: string;
   authorAvatarUrl?: string; // signed URL
   promptId?: string;
+  promptDate?: string; // YYYY-MM-DD (Pacific prompt/cycle date)
 }
 
 interface YimPostProps {
@@ -74,7 +75,8 @@ const GRADIENTS: Record<
   Exclude<BackgroundType, "photo" | keyof typeof IMAGE_BACKGROUNDS>,
   readonly [string, string]
 > = {
-  lime: ["hsl(82 85% 55%)", "hsl(120 70% 45%)"],
+  // design.md: keep the lime hue consistent across the app.
+  lime: ["hsl(82 85% 55%)", "hsl(82 85% 45%)"],
   pink: ["hsl(330 85% 60%)", "hsl(280 70% 50%)"],
   sunset: ["hsl(25 95% 55%)", "hsl(330 85% 60%)"],
   cyber: ["hsl(185 85% 55%)", "hsl(270 85% 65%)"],
@@ -103,28 +105,12 @@ function getTextColor(fontColor: FontColor) {
   return fontColor === "black" ? "hsl(0 0% 4%)" : "hsl(60 9% 98%)";
 }
 
-function getAutoFontSize(textLength: number, size: "sm" | "md" | "lg") {
-  const len = Math.max(0, textLength);
+function getBaseFontSize(size: "sm" | "md" | "lg") {
+  return size === "sm" ? 16 : size === "lg" ? 32 : 28;
+}
 
-  if (size === "sm") {
-    if (len <= 40) return 16;
-    if (len <= 80) return 14;
-    if (len <= 140) return 12;
-    return 10;
-  }
-
-  if (size === "lg") {
-    if (len <= 60) return 32;
-    if (len <= 120) return 26;
-    if (len <= 200) return 22;
-    return 18;
-  }
-
-  // size === "md"
-  if (len <= 60) return 28;
-  if (len <= 120) return 22;
-  if (len <= 200) return 18;
-  return 16;
+function getMinFontSize(size: "sm" | "md" | "lg") {
+  return size === "sm" ? 10 : size === "lg" ? 18 : 14;
 }
 
 export function YimPost({
@@ -159,7 +145,19 @@ export function YimPost({
   }, [post.background, post.photoBackgroundUrl]);
 
   const effectiveQuote = displayQuote ?? "";
-  const quoteSize = getAutoFontSize(effectiveQuote.length, size);
+
+  const maxFontSize = useMemo(() => getBaseFontSize(size), [size]);
+  const minFontSize = useMemo(() => getMinFontSize(size), [size]);
+  const [quoteSize, setQuoteSize] = useState<number>(() => getBaseFontSize(size));
+  const [quoteBox, setQuoteBox] = useState<{ width: number; height: number } | null>(null);
+
+  // Recalculate sizing when font changes (or size variant changes).
+  useEffect(() => {
+    setQuoteSize(getBaseFontSize(size));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontFamily, size]);
+
+  const quoteLineHeight = Math.round(quoteSize * 1.15);
 
   const cardPadding = size === "sm" ? 12 : size === "lg" ? 24 : 20;
   const borderRadius = borderRadiusOverride ?? (previewMode ? 16 : 51); // signature radius for posts
@@ -190,7 +188,13 @@ export function YimPost({
 
       {/* Foreground */}
       <View className="flex-1">
-        <View className="flex-1 items-center justify-center px-1">
+        <View
+          className="flex-1 items-center justify-center px-1"
+          onLayout={(e) => {
+            const { width, height } = e.nativeEvent.layout;
+            if (width > 0 && height > 0) setQuoteBox({ width, height });
+          }}
+        >
           {/* Optional highlight behind the quote */}
           {post.textHighlight ? (
             <View
@@ -209,6 +213,40 @@ export function YimPost({
             />
           ) : null}
 
+          {/* Hidden measuring text to drive auto font-size (accounts for font changes + wrapping). */}
+          <Text
+            style={{
+              position: "absolute",
+              opacity: 0,
+              zIndex: -1,
+              width: "100%",
+              paddingHorizontal: 0,
+              fontFamily,
+              fontSize: quoteSize,
+              lineHeight: quoteLineHeight,
+              textAlign: "center",
+            }}
+            onTextLayout={(e) => {
+              if (!quoteBox) return;
+              const totalHeight = (e.nativeEvent.lines ?? []).reduce((sum, line) => sum + (line.height ?? 0), 0);
+
+              // Hysteresis thresholds to avoid oscillation.
+              const shrinkThreshold = quoteBox.height * 0.92;
+              const growThreshold = quoteBox.height * 0.55;
+
+              if (totalHeight > shrinkThreshold && quoteSize > minFontSize) {
+                setQuoteSize((prev) => Math.max(minFontSize, prev - 1));
+                return;
+              }
+
+              if (totalHeight < growThreshold && quoteSize < maxFontSize) {
+                setQuoteSize((prev) => Math.min(maxFontSize, prev + 1));
+              }
+            }}
+          >
+            {effectiveQuote}
+          </Text>
+
           {editableQuote && onChangeQuote ? (
             <TextInput
               value={post.quote}
@@ -219,12 +257,15 @@ export function YimPost({
               placeholder={quotePlaceholder}
               placeholderTextColor="rgba(255,255,255,0.65)"
               multiline
+              scrollEnabled={false}
               textAlign="center"
+              textAlignVertical="center"
               style={{
                 zIndex: 1,
+                width: "100%",
                 fontFamily,
                 fontSize: quoteSize,
-                lineHeight: Math.round(quoteSize * 1.15),
+                lineHeight: quoteLineHeight,
                 color: textColor,
                 opacity: isPlaceholder ? 0.55 : 1,
               }}
@@ -235,7 +276,7 @@ export function YimPost({
                 zIndex: 1,
                 fontFamily,
                 fontSize: quoteSize,
-                lineHeight: Math.round(quoteSize * 1.15),
+                lineHeight: quoteLineHeight,
                 color: textColor,
                 textAlign: "center",
                 opacity: isPlaceholder ? 0.55 : 1,
@@ -258,7 +299,7 @@ export function YimPost({
             </View>
 
             <Text style={{ fontFamily: "BebasNeue", color: textColor, fontSize: 16, letterSpacing: 2 }}>
-              PONDR
+              PONDER
             </Text>
           </View>
         ) : null}

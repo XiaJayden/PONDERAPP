@@ -1,5 +1,4 @@
 import type { Session, User } from "@supabase/supabase-js";
-import * as AuthSession from "expo-auth-session";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -9,11 +8,65 @@ import { supabase } from "@/lib/supabase";
 // Completes the auth session on web (safe no-op on native). Keeps behavior consistent.
 WebBrowser.maybeCompleteAuthSession();
 
+function getOAuthRedirectUrl() {
+  // IMPORTANT:
+  // - Custom scheme redirects require a Dev Client / standalone build (not Expo Go).
+  // - This URL MUST be added to Supabase Dashboard:
+  //   Authentication → URL Configuration → Redirect URLs
+  //   Add: PONDERnative://auth/callback
+  // - Without this, Supabase will redirect to your site URL instead of the app.
+  const scheme = "PONDERnative"; // keep in sync with `app.json` -> expo.scheme
+  const redirectUrl = Linking.createURL("auth/callback", { scheme }); // e.g. PONDERnative://auth/callback
+  return redirectUrl;
+}
+
+function getEmailRedirectUrl() {
+  // For email confirmation, we need a WEB URL that then redirects to the app.
+  // Custom schemes (PONDERnative://) can't be opened directly from server redirects.
+  //
+  // Set EXPO_PUBLIC_SITE_URL to your hosted web URL (e.g., https://yourapp.com)
+  // The web page at /auth/callback will redirect to the native app.
+  const siteUrl = process.env.EXPO_PUBLIC_SITE_URL;
+
+  if (!siteUrl) {
+    if (__DEV__) {
+      console.warn(
+        "[auth] EXPO_PUBLIC_SITE_URL not set. Email confirmation links will redirect to Supabase Site URL.\n" +
+          "Set EXPO_PUBLIC_SITE_URL to your web URL (e.g., https://yourapp.com) for proper app redirects."
+      );
+    }
+    // Fall back to native scheme (won't work for email, but will work for OAuth)
+    return getOAuthRedirectUrl();
+  }
+
+  return `${siteUrl}/auth/callback`;
+}
+
+async function exchangeCodeFromUrl(url: string) {
+  // Supabase OAuth (PKCE) returns `code` as a query param in the redirect.
+  const parsed = Linking.parse(url);
+  const code = parsed.queryParams?.code;
+  const error = parsed.queryParams?.error;
+  const errorDescription = parsed.queryParams?.error_description;
+
+  if (error) {
+    throw new Error(typeof errorDescription === "string" ? errorDescription : String(error));
+  }
+
+  if (!code || typeof code !== "string") {
+    throw new Error("[auth] OAuth redirect missing `code` param");
+  }
+
+  const exchange = await supabase.auth.exchangeCodeForSession(code);
+  if (exchange.error) throw exchange.error;
+}
+
 interface AuthContextValue {
   user: User | null;
   session: Session | null;
   isLoading: boolean;
   errorMessage: string | null;
+  isEmailConfirmed: boolean;
 
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
@@ -33,6 +86,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     async function init() {
       try {
+        // Handle cold-start deep links (e.g. after OAuth redirect).
+        const initialUrl = await Linking.getInitialURL();
+        if (initialUrl) {
+          try {
+            await exchangeCodeFromUrl(initialUrl);
+          } catch (e) {
+            if (__DEV__) console.warn("[auth] initial URL exchange failed", e);
+          }
+        }
+
         const { data, error } = await supabase.auth.getSession();
         if (isCancelled) return;
 
@@ -55,9 +118,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(nextSession);
     });
 
+    const urlSub = Linking.addEventListener("url", ({ url }) => {
+      // Best-effort: if app is opened via OAuth redirect, exchange the code for a session.
+      void (async () => {
+        try {
+          await exchangeCodeFromUrl(url);
+        } catch (e) {
+          if (__DEV__) console.warn("[auth] url event exchange failed", e);
+        }
+      })();
+    });
+
     return () => {
       isCancelled = true;
       subscriptionData.subscription.unsubscribe();
+      urlSub.remove();
     };
   }, []);
 
@@ -75,7 +150,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function signUp(email: string, password: string) {
     setErrorMessage(null);
 
-    const { error } = await supabase.auth.signUp({ email, password });
+    const emailRedirectTo = getEmailRedirectUrl();
+
+    if (__DEV__) {
+      console.log("[auth] signUp emailRedirectTo", { emailRedirectTo });
+    }
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        // This tells Supabase where to redirect after email confirmation.
+        // Must be a WEB URL that then redirects to the native app.
+        emailRedirectTo,
+      },
+    });
     if (error) {
       console.error("[auth] signUp failed", error);
       setErrorMessage(error.message);
@@ -88,6 +177,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { error } = await supabase.auth.signOut();
     if (error) {
+      // If there's no session, the user is effectively already logged out - not an error
+      if (error.name === "AuthSessionMissingError") {
+        if (__DEV__) console.log("[auth] signOut: no session to sign out from (already logged out)");
+        setSession(null);
+        return;
+      }
       console.error("[auth] signOut failed", error);
       setErrorMessage(error.message);
       throw error;
@@ -97,10 +192,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function signInWithGoogle() {
     setErrorMessage(null);
 
-    // Uses your Expo scheme in `app.json` (currently: `pondrnative`).
-    const redirectTo = AuthSession.makeRedirectUri({ scheme: "pondrnative" });
+    const redirectTo = getOAuthRedirectUrl();
 
-    if (__DEV__) console.log("[auth] signInWithGoogle redirectTo", { redirectTo });
+    if (__DEV__) {
+      console.log("[auth] signInWithGoogle redirectTo", { redirectTo });
+      console.log("[auth] IMPORTANT: Ensure this URL is in Supabase Dashboard → Authentication → URL Configuration → Redirect URLs:", redirectTo);
+    }
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -129,24 +226,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (result.type !== "success" || !result.url) return;
 
-    // Supabase OAuth returns `code` for PKCE.
-    const parsed = Linking.parse(result.url);
-    const code = parsed.queryParams?.code;
-
-    if (!code || typeof code !== "string") {
-      const err = new Error("[auth] OAuth redirect missing `code` param");
-      console.error(err, { url: result.url, parsed });
-      setErrorMessage(err.message);
-      throw err;
-    }
-
-    const exchange = await supabase.auth.exchangeCodeForSession(code);
-    if (exchange.error) {
-      console.error("[auth] exchangeCodeForSession failed", exchange.error);
-      setErrorMessage(exchange.error.message);
-      throw exchange.error;
+    try {
+      await exchangeCodeFromUrl(result.url);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[auth] exchangeCodeFromUrl failed", e);
+      setErrorMessage(msg);
+      throw e;
     }
   }
+
+  // Check if the user's email is confirmed
+  const isEmailConfirmed = Boolean(session?.user?.email_confirmed_at);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -154,12 +245,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       session,
       isLoading,
       errorMessage,
+      isEmailConfirmed,
       signIn,
       signUp,
       signOut,
       signInWithGoogle,
     }),
-    [session, isLoading, errorMessage]
+    [session, isLoading, errorMessage, isEmailConfirmed]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

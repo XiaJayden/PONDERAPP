@@ -7,6 +7,7 @@ import { ActivityIndicator, Image, Platform, Pressable, Text, TextInput, View } 
 import { useAuth } from "@/providers/auth-provider";
 import { useProfile } from "@/hooks/useProfile";
 import { supabase } from "@/lib/supabase";
+import { hasSeenWelcome } from "@/lib/welcome-store";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -175,8 +176,15 @@ export default function OnboardingScreen() {
         onboarding_complete: true,
       });
 
-      if (__DEV__) console.log("[onboarding] complete → tabs");
-      router.replace("/(tabs)");
+      // Check if user has seen welcome screen
+      const seenWelcome = await hasSeenWelcome(user.id);
+      if (!seenWelcome) {
+        if (__DEV__) console.log("[onboarding] complete → welcome");
+        router.replace("/(auth)/welcome");
+      } else {
+        if (__DEV__) console.log("[onboarding] complete → tabs");
+        router.replace("/(tabs)");
+      }
     } catch (error) {
       console.error("[onboarding] submit failed", error);
       setErrorMessage("Failed to complete onboarding. Please try again.");

@@ -26,7 +26,7 @@ export function PromptPopup({
         <View style={styles.sheetWrap}>
           <View style={styles.card}>
             <View style={styles.headerRow}>
-              <Text style={styles.kicker}>Today’s PONDR</Text>
+              <Text style={styles.kicker}>Today’s PONDER</Text>
               <Pressable
                 onPress={onClose}
                 style={styles.closeButton}
@@ -65,9 +65,9 @@ const styles: Record<string, any> = {
     zIndex: 9999,
   },
   backdropPad: { flex: 1, paddingHorizontal: 16 },
-  sheetWrap: { flex: 1, justifyContent: "flex-end", paddingBottom: 40 },
+  sheetWrap: { flex: 1, justifyContent: "flex-end", paddingBottom: 16, paddingTop: 16 },
   card: {
-    minHeight: 420,
+    height: "92%",
     borderRadius: 24,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
@@ -83,19 +83,20 @@ const styles: Record<string, any> = {
   },
   closeButton: { height: 40, width: 40, alignItems: "center", justifyContent: "center" },
   closeIcon: { fontSize: 22, lineHeight: 22, color: "rgba(255,255,255,0.55)" },
-  explainer: { marginTop: 20, fontSize: 16, lineHeight: 24, color: "rgba(255,255,255,0.65)" },
+  explainer: { marginTop: 20, fontSize: 16, lineHeight: 24, color: "rgba(255,255,255,0.65)", fontFamily: "SpaceMono" },
   questionWrap: { marginTop: 24, flex: 1, justifyContent: "flex-end" },
-  question: { fontSize: 30, lineHeight: 36, color: "rgba(255,255,255,0.95)" },
+  question: { fontSize: 30, lineHeight: 36, color: "rgba(255,255,255,0.95)", fontFamily: "PlayfairDisplay" },
   respondButton: {
     marginTop: 16,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.92)",
+    // design.md: --primary
+    backgroundColor: "hsl(82 85% 55%)",
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  respondText: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", color: "rgba(0,0,0,0.90)" },
+  respondText: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", color: "rgba(0,0,0,0.90)", fontFamily: "SpaceMono" },
 };
 
 

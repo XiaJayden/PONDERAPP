@@ -1,8 +1,12 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useQuery } from "@tanstack/react-query";
 
 import { CreatePost } from "@/components/posts/create-post";
+import { pendingPostQueryKey, fetchPendingPost } from "@/hooks/useYimFeed";
+import { useAuth } from "@/providers/auth-provider";
+import { getPacificIsoDateForCycleStart } from "@/lib/timezone";
 import { useYimFeed } from "@/hooks/useYimFeed";
 
 export default function CreateScreen() {
@@ -10,9 +14,21 @@ export default function CreateScreen() {
     promptId?: string;
     promptText?: string;
     promptDate?: string;
+    postId?: string;
+    edit?: string;
   }>();
 
+  const { user } = useAuth();
   const { addPostOptimistically, refetch } = useYimFeed();
+  const cycleDateKey = getPacificIsoDateForCycleStart(new Date(), 6);
+
+  const pendingPostQ = useQuery({
+    queryKey: user?.id && params.edit === "true" ? pendingPostQueryKey(user.id, cycleDateKey) : ["pendingPost", "disabled"],
+    queryFn: () => fetchPendingPost(user!.id, cycleDateKey),
+    enabled: !!user?.id && params.edit === "true",
+  });
+
+  const pendingPost = pendingPostQ.data ?? null;
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
@@ -21,6 +37,7 @@ export default function CreateScreen() {
           promptId={params.promptId}
           promptText={params.promptText}
           promptDate={params.promptDate}
+          existingPost={params.edit === "true" && params.postId ? pendingPost : undefined}
           onPosted={(created) => {
             // Immediately show the new post in feed, then refetch in background.
             addPostOptimistically(created);

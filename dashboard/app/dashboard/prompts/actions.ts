@@ -1,7 +1,7 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { revalidatePath } from "next/cache";
 
 function normalizeEmpty(v: FormDataEntryValue | null): string | null {
   const s = v === null ? "" : String(v).trim();
@@ -35,28 +35,48 @@ export async function reorderPrompts(orderedIds: string[]) {
   const ids = (orderedIds ?? []).map((x) => String(x)).filter(Boolean);
   if (ids.length === 0) return;
 
-  // Determine queue start date (earliest prompt_date among the prompts being reordered).
-  const { data: minDateRows, error: minDateError } = await supabaseAdmin
-    .from("daily_prompts")
-    .select("prompt_date")
-    .in("id", ids)
-    .order("prompt_date", { ascending: true })
-    .limit(1);
-  if (minDateError) throw new Error(minDateError.message);
-
-  const baseDate = (minDateRows?.[0]?.prompt_date ?? "").trim() || addDaysToISODate(formatISODateUTC(new Date()), 1);
-
   // prompt_date has a UNIQUE constraint, so swapping dates can fail if we update directly.
   // Do a 2-phase update:
-  // 1) move affected rows to temporary unique dates far in the future
+  // 1) move affected rows to temporary unique prompt_date + display_order values
   // 2) assign final (baseDate + idx) dates + display_order
-  const tempBase = "2099-12-01";
+  const [
+    { data: minDateRows, error: minDateError },
+    { data: maxDateRows, error: maxDateError },
+    { data: maxOrderRows, error: maxOrderError },
+  ] = await Promise.all([
+    // Determine queue start date (earliest prompt_date among the prompts being reordered).
+    supabaseAdmin
+      .from("daily_prompts")
+      .select("prompt_date")
+      .in("id", ids)
+      .order("prompt_date", { ascending: true })
+      .limit(1),
+    // Determine current max prompt_date overall so we can choose temp dates that can't collide.
+    supabaseAdmin.from("daily_prompts").select("prompt_date").order("prompt_date", { ascending: false }).limit(1),
+    // Determine max display_order so we can choose temp order values that can't collide.
+    supabaseAdmin.from("daily_prompts").select("display_order").order("display_order", { ascending: false }).limit(1),
+  ]);
+  if (minDateError) throw new Error(minDateError.message);
+  if (maxDateError) throw new Error(maxDateError.message);
+  if (maxOrderError) throw new Error(maxOrderError.message);
+
+  const baseDate =
+    (minDateRows?.[0]?.prompt_date ?? "").trim() || addDaysToISODate(formatISODateUTC(new Date()), 1);
+
+  const maxDate = (maxDateRows?.[0]?.prompt_date ?? "").trim() || formatISODateUTC(new Date());
+  // Push temp dates well beyond any real scheduled prompts (10y buffer) to avoid UNIQUE collisions.
+  const tempBase = addDaysToISODate(maxDate, 3650);
+
+  const maxOrderRaw = maxOrderRows?.[0]?.display_order ?? null;
+  const maxOrder = typeof maxOrderRaw === "number" && Number.isFinite(maxOrderRaw) ? maxOrderRaw : 0;
+  // Push temp display_order beyond any real orders to avoid UNIQUE collisions during the swap.
+  const tempOrderBase = maxOrder + 1000;
 
   for (let idx = 0; idx < ids.length; idx++) {
     const id = ids[idx];
     const { error } = await supabaseAdmin
       .from("daily_prompts")
-      .update({ prompt_date: addDaysToISODate(tempBase, idx) })
+      .update({ prompt_date: addDaysToISODate(tempBase, idx), display_order: tempOrderBase + idx + 1 })
       .eq("id", id);
     if (error) throw new Error(error.message);
   }
@@ -100,8 +120,28 @@ export async function createPrompt(formData: FormData) {
   const maxOrder = maxOrderRows?.[0]?.display_order ?? null;
   const display_order = (typeof maxOrder === "number" && Number.isFinite(maxOrder) ? maxOrder : 0) + 1;
 
-  const maxDate = (maxDateRows?.[0]?.prompt_date ?? "").trim();
-  const prompt_date = maxDate ? addDaysToISODate(maxDate, 1) : addDaysToISODate(formatISODateUTC(new Date()), 1);
+  // Get the max prompt_date, or use today as fallback
+  const maxDateRaw = maxDateRows?.[0]?.prompt_date;
+  const maxDate = typeof maxDateRaw === "string" && maxDateRaw.trim().length > 0 ? maxDateRaw.trim() : null;
+  
+  // Calculate prompt_date: if we have existing prompts, add 1 day to the latest; otherwise use tomorrow
+  let prompt_date: string;
+  if (maxDate) {
+    try {
+      prompt_date = addDaysToISODate(maxDate, 1);
+    } catch {
+      // If date calculation fails, fall back to tomorrow
+      prompt_date = addDaysToISODate(formatISODateUTC(new Date()), 1);
+    }
+  } else {
+    // No existing prompts, use tomorrow
+    prompt_date = addDaysToISODate(formatISODateUTC(new Date()), 1);
+  }
+
+  // Validate prompt_date before insert (must be YYYY-MM-DD format)
+  if (!prompt_date || prompt_date.length !== 10 || !/^\d{4}-\d{2}-\d{2}$/.test(prompt_date)) {
+    throw new Error(`Invalid prompt_date calculated: ${prompt_date}. Expected YYYY-MM-DD format.`);
+  }
 
   const { error } = await supabaseAdmin.from("daily_prompts").insert({
     prompt_text,

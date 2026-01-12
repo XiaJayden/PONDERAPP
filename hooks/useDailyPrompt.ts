@@ -1,27 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { getPacificTimeForPromptDate, getTodayPacificIsoDate } from "@/lib/timezone";
-import { getUserPromptOpenTime, setUserPromptOpenTime } from "@/lib/prompt-store";
+import { getPacificIsoDateForCycleStart, getTodayPacificIsoDate } from "@/lib/timezone";
+import { clearDevHasRespondedOverride, getDevHasRespondedOverride } from "@/lib/prompt-store";
 import { useAuth } from "@/providers/auth-provider";
 
-function envFlagEnabled(value: string | undefined) {
-  const v = String(value ?? "").trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes" || v === "on";
-}
-
-/**
- * TEMP: disables prompt timing gates (6am release / 12pm close / 12:30pm post release + 30-min window).
- *
- * Default behavior:
- * - Enabled in dev (`__DEV__`) for fast iteration/testing.
- * - Can also be enabled explicitly via env var for a TestFlight/preview build.
- *
- * Env:
- * - EXPO_PUBLIC_DISABLE_PROMPT_TIME_RESTRICTIONS=true
- */
-const DISABLE_PROMPT_TIME_RESTRICTIONS =
-  __DEV__ || envFlagEnabled(process.env.EXPO_PUBLIC_DISABLE_PROMPT_TIME_RESTRICTIONS);
 
 export interface DailyPrompt {
   id: string;
@@ -37,16 +21,14 @@ interface UseDailyPromptResult {
   isLoading: boolean;
   errorMessage: string | null;
 
-  hasResponded: boolean;
-  isPromptAvailable: boolean; // after 6am PT
-  isResponseWindowOpen: boolean; // before 12pm PT
-  isInResponseWindow: boolean; // after user opened prompt AND before their deadline
+  // Single-login daily cycle (6AM→6AM Pacific)
+  cycleDateKey: string; // YYYY-MM-DD
+  hasAnsweredToday: boolean;
 
-  timeUntilDeadline: number | null; // ms
-  timeUntilRelease: number | null; // ms (until 12:30pm PT)
+  // Back-compat aliases used throughout the app
+  hasResponded: boolean;
 
   // Actions
-  markPromptOpened: () => Promise<void>;
   refetch: () => Promise<void>;
 }
 
@@ -57,31 +39,6 @@ type DevPromptOverride = {
   created_at: string;
 } | null;
 
-function getPromptAvailableTime(promptDate: string) {
-  return getPacificTimeForPromptDate(promptDate, 6, 0);
-}
-
-function getResponseWindowCloseTime(promptDate: string) {
-  return getPacificTimeForPromptDate(promptDate, 12, 0);
-}
-
-function getPostReleaseTime(promptDate: string) {
-  return getPacificTimeForPromptDate(promptDate, 12, 30);
-}
-
-function isAfterOrEqual(a: Date, b: Date) {
-  return a.getTime() >= b.getTime();
-}
-
-function isBefore(a: Date, b: Date) {
-  return a.getTime() < b.getTime();
-}
-
-function getTimeUntil(target: Date, now: Date) {
-  const diff = target.getTime() - now.getTime();
-  if (diff <= 0) return null;
-  return diff;
-}
 
 async function didUserRespondToPrompt(params: { userId: string; promptId: string }) {
   const { data, error } = await supabase
@@ -100,240 +57,187 @@ async function didUserRespondToPrompt(params: { userId: string; promptId: string
   return !!data;
 }
 
+export function dailyPromptQueryKey() {
+  return ["dailyPrompt", "current"] as const;
+}
+
+export function dailyPromptForDateQueryKey(promptDate: string) {
+  return ["dailyPrompt", "date", promptDate] as const;
+}
+
+export async function fetchPromptForDate(promptDate: string): Promise<DailyPrompt | null> {
+  const { data, error } = await supabase
+    .from("daily_prompts")
+    .select("*")
+    .eq("prompt_date", promptDate)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    if ((error as any).code === "PGRST116") return null;
+    throw error;
+  }
+  if (!data) return null;
+
+  return {
+    id: String((data as any).id),
+    prompt_text: String((data as any).prompt_text),
+    explanation_text: (data as any).explanation_text ? String((data as any).explanation_text) : null,
+    prompt_date: String((data as any).prompt_date),
+    theme: (data as any).theme ? String((data as any).theme) : null,
+    display_order: (data as any).display_order ?? null,
+  };
+}
+
+async function fetchLatestPrompt(): Promise<DailyPrompt | null> {
+  const { data, error } = await supabase
+    .from("daily_prompts")
+    .select("*")
+    .order("prompt_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    if ((error as any).code === "PGRST116") return null;
+    throw error;
+  }
+  if (!data) return null;
+
+  return {
+    id: String((data as any).id),
+    prompt_text: String((data as any).prompt_text),
+    explanation_text: (data as any).explanation_text ? String((data as any).explanation_text) : null,
+    prompt_date: String((data as any).prompt_date),
+    theme: (data as any).theme ? String((data as any).theme) : null,
+    display_order: (data as any).display_order ?? null,
+  };
+}
+
+export async function fetchCurrentPrompt(now: Date = new Date()): Promise<DailyPrompt | null> {
+  const cycleDateKey = getPacificIsoDateForCycleStart(now, 6);
+  return fetchPromptForDate(cycleDateKey);
+}
+
+export function devPromptOverrideQueryKey(userId: string) {
+  return ["devPromptOverride", userId] as const;
+}
+
+export async function fetchDevPromptOverride(userId: string): Promise<DevPromptOverride> {
+  // Best-effort; if table/policy doesn't exist, ignore.
+  const { data: overrideData, error: overrideError } = await supabase
+    .from("dev_prompt_overrides")
+    .select("force_open,force_closed,expires_at,created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (overrideError) {
+    if (__DEV__) console.warn("[useDailyPrompt] dev override fetch failed", overrideError);
+    return null;
+  }
+
+  if (!overrideData) return null;
+  return {
+    force_open: !!(overrideData as any).force_open,
+    force_closed: !!(overrideData as any).force_closed,
+    expires_at: (overrideData as any).expires_at ?? null,
+    created_at: String((overrideData as any).created_at),
+  };
+}
+
+export function didRespondQueryKey(userId: string, promptId: string) {
+  return ["didRespondToPrompt", userId, promptId] as const;
+}
+
+export async function fetchDidUserRespondToPrompt(params: { userId: string; promptId: string }) {
+  return didUserRespondToPrompt(params);
+}
+
 export function useDailyPrompt(): UseDailyPromptResult {
   const { user } = useAuth();
+  const prevPromptIdRef = useRef<string | null>(null);
+  const userId = user?.id ?? null;
 
-  const [prompt, setPrompt] = useState<DailyPrompt | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const cycleDateKey = useMemo(() => getPacificIsoDateForCycleStart(new Date(), 6), []);
 
-  const [hasResponded, setHasResponded] = useState(false);
-  const [timeUntilDeadline, setTimeUntilDeadline] = useState<number | null>(null);
-  const [timeUntilRelease, setTimeUntilRelease] = useState<number | null>(null);
-  const [devOverride, setDevOverride] = useState<DevPromptOverride>(null);
+  const promptQ = useQuery({
+    queryKey: dailyPromptForDateQueryKey(cycleDateKey),
+    queryFn: async () => {
+      const p = await fetchPromptForDate(cycleDateKey);
+      // Dev ergonomics: if today's cycle prompt isn't seeded yet, fall back to the latest prompt
+      // so Reset Cycle → Respond can still be tested end-to-end.
+      if (!p && __DEV__) return fetchLatestPrompt();
+      return p;
+    },
+  });
+
+  const prompt = promptQ.data ?? null;
+
+  const respondedQ = useQuery({
+    queryKey: userId && prompt?.id ? didRespondQueryKey(userId, prompt.id) : ["didRespondToPrompt", "disabled"],
+    queryFn: () => fetchDidUserRespondToPrompt({ userId: userId as string, promptId: (prompt as DailyPrompt).id }),
+    enabled: !!userId && !!prompt?.id,
+  });
+
+  const overrideQ = useQuery({
+    queryKey: userId ? devPromptOverrideQueryKey(userId) : ["devPromptOverride", "disabled"],
+    queryFn: () => fetchDevPromptOverride(userId as string),
+    enabled: !!userId,
+  });
+
+  const hasResponded = respondedQ.data ?? false;
+  const devOverride = overrideQ.data ?? null;
+
+  const devRespondedOverrideQ = useQuery({
+    queryKey:
+      __DEV__ && userId && prompt?.id
+        ? ["devHasRespondedOverride", userId, prompt.id, prompt.prompt_date]
+        : ["devHasRespondedOverride", "disabled"],
+    queryFn: () =>
+      getDevHasRespondedOverride({
+        userId: userId as string,
+        promptId: (prompt as DailyPrompt).id,
+        promptDate: (prompt as DailyPrompt).prompt_date,
+      }),
+    enabled: __DEV__ && !!userId && !!prompt?.id,
+  });
+
+  const devHasRespondedOverride = devRespondedOverrideQ.data ?? null;
+  const effectiveHasResponded = devHasRespondedOverride !== null ? devHasRespondedOverride : hasResponded;
+
+  const isLoading = promptQ.isLoading || overrideQ.isLoading || respondedQ.isLoading || devRespondedOverrideQ.isLoading;
+  const errorMessage =
+    (promptQ.error instanceof Error ? promptQ.error.message : promptQ.error ? String(promptQ.error) : null) ??
+    (overrideQ.error instanceof Error ? overrideQ.error.message : overrideQ.error ? String(overrideQ.error) : null) ??
+    (respondedQ.error instanceof Error ? respondedQ.error.message : respondedQ.error ? String(respondedQ.error) : null) ??
+    (devRespondedOverrideQ.error instanceof Error
+      ? devRespondedOverrideQ.error.message
+      : devRespondedOverrideQ.error
+        ? String(devRespondedOverrideQ.error)
+        : null);
 
   async function refetch() {
-    setIsLoading(true);
-    setErrorMessage(null);
-
-    try {
-      // Match the web MVP logic: prefer display_order when available, fallback to legacy is_active.
-      let { data: promptData, error: promptError } = await supabase
-        .from("daily_prompts")
-        .select("*")
-        .not("display_order", "is", null)
-        .order("display_order", { ascending: true })
-        .limit(1)
-        .single();
-
-      if (promptError && (promptError.message?.includes("display_order") || promptError.code === "42703")) {
-        const fallback = await supabase
-          .from("daily_prompts")
-          .select("*")
-          .eq("is_active", true)
-          .order("prompt_date", { ascending: false })
-          .limit(1)
-          .single();
-        promptData = fallback.data;
-        promptError = fallback.error;
-      }
-
-      if (promptError && promptError.code !== "PGRST116") throw promptError;
-
-      if (!promptData) {
-        setPrompt(null);
-        setHasResponded(false);
-        setTimeUntilDeadline(null);
-        setTimeUntilRelease(null);
-        return;
-      }
-
-      const mapped: DailyPrompt = {
-        id: String(promptData.id),
-        prompt_text: String(promptData.prompt_text),
-        explanation_text: promptData.explanation_text ? String(promptData.explanation_text) : null,
-        prompt_date: String(promptData.prompt_date),
-        theme: promptData.theme ? String(promptData.theme) : null,
-        display_order: promptData.display_order ?? null,
-      };
-
-      setPrompt(mapped);
-
-      // Responded status
-      if (user) setHasResponded(await didUserRespondToPrompt({ userId: user.id, promptId: mapped.id }));
-      else setHasResponded(false);
-
-      // Dev override (best-effort; if table/policy doesn't exist, ignore).
-      if (user) {
-        const { data: overrideData, error: overrideError } = await supabase
-          .from("dev_prompt_overrides")
-          .select("force_open,force_closed,expires_at,created_at")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (overrideError) {
-          if (__DEV__) console.warn("[useDailyPrompt] dev override fetch failed", overrideError);
-          setDevOverride(null);
-        } else {
-          setDevOverride(
-            overrideData
-              ? {
-                  force_open: !!(overrideData as any).force_open,
-                  force_closed: !!(overrideData as any).force_closed,
-                  expires_at: (overrideData as any).expires_at ?? null,
-                  created_at: String((overrideData as any).created_at),
-                }
-              : null
-          );
-        }
-      } else {
-        setDevOverride(null);
-      }
-
-      // Timers are computed in the interval effect below.
-    } catch (error) {
-      console.error("[useDailyPrompt] refetch failed", error);
-      setErrorMessage(error instanceof Error ? error.message : "Failed to fetch daily prompt");
-      setPrompt(null);
-      setHasResponded(false);
-      setDevOverride(null);
-    } finally {
-      setIsLoading(false);
-    }
+    const tasks: Promise<unknown>[] = [promptQ.refetch()];
+    if (userId) tasks.push(overrideQ.refetch());
+    if (userId && prompt?.id) tasks.push(respondedQ.refetch());
+    if (__DEV__ && userId && prompt?.id) tasks.push(devRespondedOverrideQ.refetch());
+    await Promise.allSettled(tasks);
   }
 
-  useEffect(() => {
-    void refetch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  async function markPromptOpened() {
-    if (!user || !prompt) return;
-    await setUserPromptOpenTime({ userId: user.id, promptId: prompt.id, promptDate: prompt.prompt_date });
-  }
-
-  // Update timers every second (simple + debug friendly).
-  useEffect(() => {
-    if (!prompt) return;
-
-    let isCancelled = false;
-
-    async function tick() {
-      if (isCancelled) return;
-      const now = new Date();
-
-      if (DISABLE_PROMPT_TIME_RESTRICTIONS) {
-        // While testing, treat the prompt as always open and posts as already released.
-        setTimeUntilDeadline(null);
-        setTimeUntilRelease(null);
-        return;
-      }
-
-      const isDevOverrideActive =
-        !!devOverride &&
-        (devOverride.expires_at === null || new Date(devOverride.expires_at).getTime() > now.getTime()) &&
-        (devOverride.force_open || devOverride.force_closed);
-
-      const availableAt = getPromptAvailableTime(prompt.prompt_date);
-      const closesAt = getResponseWindowCloseTime(prompt.prompt_date);
-      const releasesAt = getPostReleaseTime(prompt.prompt_date);
-
-      // Deadline depends on user prompt open time.
-      if (!user) {
-        setTimeUntilDeadline(null);
-      } else {
-        if (isDevOverrideActive && devOverride?.force_closed) {
-          setTimeUntilDeadline(null);
-        } else if (isDevOverrideActive && devOverride?.force_open) {
-          // For dev testing, treat deadline as 30 minutes from now.
-          setTimeUntilDeadline(30 * 60 * 1000);
-        } else {
-        const openTime = await getUserPromptOpenTime({
-          userId: user.id,
-          promptId: prompt.id,
-          promptDate: prompt.prompt_date,
-        });
-
-        if (!openTime) {
-          setTimeUntilDeadline(null);
-        } else {
-          const userThirtyMinDeadline = new Date(openTime.getTime() + 30 * 60 * 1000);
-          const deadline = userThirtyMinDeadline.getTime() < closesAt.getTime() ? userThirtyMinDeadline : closesAt;
-          const untilDeadline = getTimeUntil(deadline, now);
-          setTimeUntilDeadline(untilDeadline);
-        }
-        }
-      }
-
-      setTimeUntilRelease(getTimeUntil(releasesAt, now));
-
-      if (__DEV__) {
-        // This can be chatty, so only log occasionally.
-      }
-    }
-
-    void tick();
-    const id = setInterval(() => void tick(), 1000);
-    return () => {
-      isCancelled = true;
-      clearInterval(id);
-    };
-  }, [prompt?.id, prompt?.prompt_date, user?.id, devOverride]);
-
-  const computed = useMemo(() => {
-    const now = new Date();
-    if (!prompt) {
-      return {
-        isPromptAvailable: false,
-        isResponseWindowOpen: false,
-        isInResponseWindow: false,
-      };
-    }
-
-    if (DISABLE_PROMPT_TIME_RESTRICTIONS) {
-      return { isPromptAvailable: true, isResponseWindowOpen: true, isInResponseWindow: !!user };
-    }
-
-    const isDevOverrideActive =
-      !!devOverride &&
-      (devOverride.expires_at === null || new Date(devOverride.expires_at).getTime() > now.getTime()) &&
-      (devOverride.force_open || devOverride.force_closed);
-
-    const availableAt = getPromptAvailableTime(prompt.prompt_date);
-    const closesAt = getResponseWindowCloseTime(prompt.prompt_date);
-
-    const isPromptAvailable = isAfterOrEqual(now, availableAt);
-    const isResponseWindowOpen = isBefore(now, closesAt);
-
-    // Being “in” response window requires that user opened prompt and a deadline exists.
-    const baseIsInWindow = !!user && isPromptAvailable && isResponseWindowOpen && timeUntilDeadline !== null;
-
-    if (isDevOverrideActive && devOverride?.force_closed) {
-      return { isPromptAvailable, isResponseWindowOpen: false, isInResponseWindow: false };
-    }
-
-    if (isDevOverrideActive && devOverride?.force_open) {
-      // Force open for testing (even if outside normal window).
-      return { isPromptAvailable: true, isResponseWindowOpen: true, isInResponseWindow: !!user };
-    }
-
-    return { isPromptAvailable, isResponseWindowOpen, isInResponseWindow: baseIsInWindow };
-  }, [prompt, timeUntilDeadline, user, devOverride]);
-
-  // Date key for “popup shown today” flags.
+  // Date key for "popup shown today" flags.
   const todayPacific = useMemo(() => getTodayPacificIsoDate(), []);
 
-  if (__DEV__ && prompt && user) {
-    // One-time-ish log when prompt changes; helps debug timing issues.
+  // Only log when promptId actually changes (not on every render/timer update).
+  if (__DEV__ && prompt && user && prompt.id !== prevPromptIdRef.current) {
+    prevPromptIdRef.current = prompt.id;
     // eslint-disable-next-line no-console
-    console.log("[useDailyPrompt] state", {
+    console.log("[useDailyPrompt] prompt changed", {
       promptId: prompt.id,
       promptDate: prompt.prompt_date,
       todayPacific,
-      hasResponded,
+      hasResponded: effectiveHasResponded,
       devOverride,
-      ...computed,
     });
   }
 
@@ -341,14 +245,14 @@ export function useDailyPrompt(): UseDailyPromptResult {
     prompt,
     isLoading,
     errorMessage,
-    hasResponded,
-    timeUntilDeadline,
-    timeUntilRelease,
-    ...computed,
-    markPromptOpened,
+    cycleDateKey,
+    hasAnsweredToday: effectiveHasResponded,
+    hasResponded: effectiveHasResponded,
     refetch,
   };
 }
+
+
 
 
 

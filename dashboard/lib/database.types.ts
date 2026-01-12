@@ -121,6 +121,24 @@ export type Database = {
         Update: Record<string, never>;
         Relationships: [];
       };
+      profiles: {
+        Row: {
+          id: string;
+          display_name: string | null;
+          avatar_url: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id: string;
+          display_name?: string | null;
+          avatar_url?: string | null;
+        };
+        Update: {
+          display_name?: string | null;
+          avatar_url?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

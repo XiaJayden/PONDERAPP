@@ -8,7 +8,7 @@ export default function Home() {
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-xs uppercase tracking-wider text-white/60">Pondr</div>
+              <div className="text-xs uppercase tracking-wider text-white/60">PONDER</div>
               <h1 className="mt-1 text-xl font-semibold">Development Dashboard</h1>
             </div>
             <Link className="text-sm text-white/70 underline underline-offset-4" href="/dashboard">

@@ -120,16 +120,18 @@ export default function ProfileScreen() {
 
       <ScrollView className="flex-1" contentContainerClassName="px-4 pt-6 pb-24">
         {/* Header */}
-        <View className="flex-row items-center justify-between">
-          <Text className="font-display text-3xl text-foreground">Profile</Text>
+        <View className="relative items-center justify-center">
+          <Text className="font-display text-4xl text-foreground">Profile</Text>
 
-          <Pressable
-            onPress={() => void signOut()}
-            className="rounded-xl border border-muted bg-card px-4 py-2"
-            accessibilityRole="button"
-          >
-            <Text className="font-mono text-xs uppercase tracking-wider text-foreground">Sign out</Text>
-          </Pressable>
+          <View className="absolute right-0">
+            <Pressable
+              onPress={() => void signOut()}
+              className="rounded-xl border border-muted bg-card px-4 py-2"
+              accessibilityRole="button"
+            >
+              <Text className="font-mono text-xs uppercase tracking-wider text-foreground">Sign out</Text>
+            </Pressable>
+          </View>
         </View>
 
         {!!profileError ? <Text className="mt-3 font-mono text-xs text-destructive">{profileError}</Text> : null}
@@ -183,7 +185,7 @@ export default function ProfileScreen() {
 
         {/* Recent posts */}
         <View className="mt-10">
-          <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Recent PONDRs</Text>
+          <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Recent PONDERs</Text>
 
           {userPosts.isLoading ? (
             <View className="mt-6 items-center justify-center">

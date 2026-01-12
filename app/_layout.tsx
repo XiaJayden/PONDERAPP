@@ -12,6 +12,10 @@ import { StatusBar } from "expo-status-bar";
 import { useColorScheme } from '@/components/useColorScheme';
 import { AuthProvider } from '@/providers/auth-provider';
 import { LoadingScreen } from '@/components/LoadingScreen';
+import { PreloadProvider, usePreload } from '@/providers/preload-provider';
+import { DevToolsProvider } from "@/providers/dev-tools-provider";
+import { DevToolsPanel } from "@/components/dev/dev-tools-panel";
+import { useNotifications } from '@/hooks/useNotifications';
 import { BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue';
 import { Inter_400Regular, Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import { SpaceMono_400Regular, SpaceMono_700Bold } from '@expo-google-fonts/space-mono';
@@ -83,9 +87,7 @@ export default function RootLayout() {
   }
 
   return (
-    <LoadingScreen>
-      <RootLayoutNav />
-    </LoadingScreen>
+    <RootLayoutNav />
   );
 }
 
@@ -95,16 +97,35 @@ function RootLayoutNav() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <StatusBar style="light" />
-          <Stack>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-            <Stack.Screen name="activity" options={{ headerShown: false, animation: "slide_from_right" }} />
-            <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-          </Stack>
-        </ThemeProvider>
+        <NotificationsInitializer />
+        <DevToolsProvider>
+          <PreloadProvider>
+            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+              <StatusBar style="light" />
+              <PreloadLoadingGate>
+                <Stack>
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+                  <Stack.Screen name="auth/callback" options={{ headerShown: false }} />
+                  <Stack.Screen name="activity" options={{ headerShown: false, animation: "slide_from_right" }} />
+                  <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+                </Stack>
+              </PreloadLoadingGate>
+              {__DEV__ ? <DevToolsPanel /> : null}
+            </ThemeProvider>
+          </PreloadProvider>
+        </DevToolsProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
+}
+
+function NotificationsInitializer() {
+  useNotifications(); // Initialize push notifications (must be inside AuthProvider)
+  return null;
+}
+
+function PreloadLoadingGate({ children }: { children: React.ReactNode }) {
+  const { isPreloading } = usePreload();
+  return <LoadingScreen isDataReady={!isPreloading}>{children}</LoadingScreen>;
 }
