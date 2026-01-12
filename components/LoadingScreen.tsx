@@ -1,5 +1,135 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Image, StyleSheet, View } from "react-native";
+
+// Preload the logo image so it's ready immediately
+const logoSource = require("../assets/vibes/ponder-logo.png");
+Image.prefetch && Image.resolveAssetSource && Image.prefetch(Image.resolveAssetSource(logoSource).uri).catch(() => {});
+
+// Tesseract / Hypercube - 3D line art
+function Tesseract() {
+  const outer = 52;
+  const inner = 28;
+  const stroke = 1;
+  const offset = (outer - inner) / 2;
+  
+  // Colors for depth effect
+  const outerColor = "rgba(255, 255, 255, 0.9)";
+  const innerColor = "rgba(255, 255, 255, 0.5)";
+  const lineColor = "rgba(255, 255, 255, 0.35)";
+  
+  // Diagonal line length for connecting edges
+  const diagLength = Math.sqrt(offset * offset + offset * offset);
+  
+  return (
+    <View style={{ width: outer, height: outer }}>
+      {/* Outer cube (front) */}
+      <View
+        style={{
+          position: "absolute",
+          width: outer,
+          height: outer,
+          borderWidth: stroke,
+          borderColor: outerColor,
+        }}
+      />
+      
+      {/* Inner cube (back/nested) */}
+      <View
+        style={{
+          position: "absolute",
+          width: inner,
+          height: inner,
+          borderWidth: stroke,
+          borderColor: innerColor,
+          top: offset,
+          left: offset,
+        }}
+      />
+      
+      {/* Connecting edges - top-left */}
+      <View
+        style={{
+          position: "absolute",
+          width: diagLength,
+          height: stroke,
+          backgroundColor: lineColor,
+          top: offset / 2,
+          left: offset / 2,
+          transform: [{ rotate: "45deg" }],
+          transformOrigin: "left center",
+        }}
+      />
+      
+      {/* Connecting edges - top-right */}
+      <View
+        style={{
+          position: "absolute",
+          width: diagLength,
+          height: stroke,
+          backgroundColor: lineColor,
+          top: offset / 2,
+          right: offset / 2,
+          transform: [{ rotate: "-45deg" }],
+          transformOrigin: "right center",
+        }}
+      />
+      
+      {/* Connecting edges - bottom-left */}
+      <View
+        style={{
+          position: "absolute",
+          width: diagLength,
+          height: stroke,
+          backgroundColor: lineColor,
+          bottom: offset / 2,
+          left: offset / 2,
+          transform: [{ rotate: "-45deg" }],
+          transformOrigin: "left center",
+        }}
+      />
+      
+      {/* Connecting edges - bottom-right */}
+      <View
+        style={{
+          position: "absolute",
+          width: diagLength,
+          height: stroke,
+          backgroundColor: lineColor,
+          bottom: offset / 2,
+          right: offset / 2,
+          transform: [{ rotate: "45deg" }],
+          transformOrigin: "right center",
+        }}
+      />
+      
+      {/* Cross diagonals through center for tesseract depth */}
+      <View
+        style={{
+          position: "absolute",
+          width: outer * 1.1,
+          height: stroke * 0.5,
+          backgroundColor: "rgba(255, 255, 255, 0.15)",
+          top: outer / 2,
+          left: -outer * 0.05,
+          transform: [{ rotate: "45deg" }],
+          transformOrigin: "center center",
+        }}
+      />
+      <View
+        style={{
+          position: "absolute",
+          width: outer * 1.1,
+          height: stroke * 0.5,
+          backgroundColor: "rgba(255, 255, 255, 0.15)",
+          top: outer / 2,
+          left: -outer * 0.05,
+          transform: [{ rotate: "-45deg" }],
+          transformOrigin: "center center",
+        }}
+      />
+    </View>
+  );
+}
 
 export function LoadingScreen({
   children,
@@ -48,12 +178,13 @@ export function LoadingScreen({
     }, 500);
   }
 
-  useEffect(() => {
-    // Rotating "cube" animation (simple 3D-ish square)
+  // useLayoutEffect ensures animation starts before first paint
+  useLayoutEffect(() => {
+    // Rotating tesseract animation
     const loop = Animated.loop(
       Animated.timing(spin, {
         toValue: 1,
-        duration: 1200,
+        duration: 4000,
         easing: Easing.linear,
         useNativeDriver: true,
       })
@@ -98,26 +229,28 @@ export function LoadingScreen({
         >
           <View style={styles.logoWrap}>
             <Image
-              source={require("../assets/vibes/ponder-logo.png")}
+              source={logoSource}
               accessibilityLabel="PONDER"
               style={styles.logo}
               resizeMode="contain"
+              fadeDuration={0}
             />
           </View>
 
           <Animated.View
             style={[
-              styles.cube,
+              styles.cubeContainer,
               {
                 transform: [
-                  { perspective: 600 },
+                  { perspective: 1000 },
                   { rotateY: spinInterpolate },
-                  { rotateX: "18deg" },
+                  { rotateX: "20deg" },
+                  { rotateZ: "5deg" },
                 ],
               },
             ]}
           >
-            <View style={styles.cubeInner} />
+            <Tesseract />
           </Animated.View>
         </Animated.View>
       ) : null}
@@ -134,27 +267,15 @@ const styles = StyleSheet.create({
     zIndex: 9999,
   },
   logoWrap: {
-    marginBottom: 32,
+    marginBottom: 40,
   },
   logo: {
     height: 96,
     width: 220,
   },
-  cube: {
-    height: 48,
-    width: 48,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.6)",
-    backgroundColor: "rgba(255,255,255,0.08)",
+  cubeContainer: {
     alignItems: "center",
     justifyContent: "center",
-  },
-  cubeInner: {
-    height: 18,
-    width: 18,
-    borderRadius: 5,
-    backgroundColor: "rgba(255,255,255,0.6)",
   },
 });
 
