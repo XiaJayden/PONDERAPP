@@ -74,7 +74,7 @@ export default async function FeedbackPage({
 
   // Fetch profiles for all user IDs
   const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean))] as string[];
-  let profilesMap: Map<string, string | null> = new Map();
+  const profilesMap: Map<string, string | null> = new Map();
 
   if (userIds.length > 0) {
     const { data: profilesData } = await supabaseAdmin

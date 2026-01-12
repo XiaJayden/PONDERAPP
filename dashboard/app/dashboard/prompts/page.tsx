@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { createPrompt } from "./actions";
 import { PromptListClient, type PromptRow } from "@/components/prompt-list-client";

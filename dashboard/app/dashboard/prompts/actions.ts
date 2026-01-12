@@ -129,7 +129,7 @@ export async function createPrompt(formData: FormData) {
   if (maxDate) {
     try {
       prompt_date = addDaysToISODate(maxDate, 1);
-    } catch (error) {
+    } catch {
       // If date calculation fails, fall back to tomorrow
       prompt_date = addDaysToISODate(formatISODateUTC(new Date()), 1);
     }

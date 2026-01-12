@@ -119,7 +119,7 @@ export default async function PerformancePage() {
     .select("word_count")
     .not("word_count", "is", null);
 
-  const wordCounts = (postsWithWordCount ?? []).map((p: any) => p.word_count ?? 0).filter((w: number) => w > 0);
+  const wordCounts = (postsWithWordCount ?? []).map((p: { word_count: number | null }) => p.word_count ?? 0).filter((w: number) => w > 0);
   const avgWordCount = wordCounts.length > 0 ? Math.round(wordCounts.reduce((a: number, b: number) => a + b, 0) / wordCounts.length) : 0;
   const medianWordCount =
     wordCounts.length > 0
@@ -157,18 +157,14 @@ export default async function PerformancePage() {
   const lurkerRate = appOpenUserSet.size > 0 ? ((lurkers.length / appOpenUserSet.size) * 100).toFixed(1) : "0.0";
 
   // 4. Social Acknowledgement Rate: Posts with likes / Total posts
-  const [{ count: totalPosts }, { count: postsWithLikes }] = await Promise.all([
+  const [{ count: totalPosts }] = await Promise.all([
     supabaseAdmin.from("yim_posts").select("id", { count: "exact", head: true }),
-    supabaseAdmin
-      .from("post_likes")
-      .select("post_id", { count: "exact", head: true })
-      .limit(1),
   ]);
 
   // Get distinct posts with likes
   const { data: distinctLikedPosts } = await supabaseAdmin.from("post_likes").select("post_id");
   const likedPostSet = new Set<string>();
-  (distinctLikedPosts ?? []).forEach((row: any) => {
+  (distinctLikedPosts ?? []).forEach((row: { post_id: string | number | null }) => {
     if (row.post_id) likedPostSet.add(String(row.post_id));
   });
 
@@ -181,7 +177,7 @@ export default async function PerformancePage() {
     .not("prompt_id", "is", null)
     .not("rating", "is", null);
 
-  const ratings = (promptRatings ?? []).map((r: any) => r.rating).filter((r: number) => typeof r === "number" && r > 0);
+  const ratings = (promptRatings ?? []).map((r: { rating: number | null }) => r.rating).filter((r: number | null): r is number => typeof r === "number" && r > 0);
   const avgPromptRating = ratings.length > 0 ? (ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length).toFixed(2) : "—";
 
   // 6. Question Sharing Rate: would_share = true / Total feedback submissions with prompt_id
@@ -191,7 +187,7 @@ export default async function PerformancePage() {
     .not("prompt_id", "is", null);
 
   const totalShareFeedback = shareFeedback?.length ?? 0;
-  const wouldShareCount = (shareFeedback ?? []).filter((f: any) => f.would_share === true).length;
+  const wouldShareCount = (shareFeedback ?? []).filter((f: { would_share: boolean | null }) => f.would_share === true).length;
   const questionSharingRate = totalShareFeedback > 0 ? (((wouldShareCount / totalShareFeedback) * 100).toFixed(1)) : "0.0";
 
   return (
@@ -236,7 +232,7 @@ export default async function PerformancePage() {
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="text-xs text-white/60">Notes</div>
           <div className="mt-1 text-sm text-white/70">
-            Response "rate" below is total posts per prompt (not distinct users).
+            Response &quot;rate&quot; below is total posts per prompt (not distinct users).
           </div>
         </div>
       </div>
