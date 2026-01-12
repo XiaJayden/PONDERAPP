@@ -30,7 +30,7 @@ export function PostPreviewModal({
 
             <View className="flex-1 items-center">
               <Image
-                source={require("../../assets/images/ponder logo.png")}
+                source={require("../../assets/images/ponder-logo.png")}
                 accessibilityLabel="ponder"
                 style={{ width: 220, height: 70, resizeMode: "contain" }}
               />

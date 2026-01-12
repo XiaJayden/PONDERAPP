@@ -127,10 +127,6 @@ async function uploadPostPhoto(params: { userId: string; uri: string }) {
 }
 
 export function CreatePost({ promptId, promptText, promptDate, existingPost, onPosted }: CreatePostProps) {
-  // #region agent log
-  console.log('[DEBUG H3] CreatePost rendered', { promptId, promptText: promptText?.substring(0, 30), promptDate, hasPromptText: !!promptText, hasExistingPost: !!existingPost });
-  // #endregion
-
   const { user } = useAuth();
   const dailyPrompt = useDailyPrompt();
   const queryClient = useQueryClient();
@@ -174,10 +170,6 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
   
   // Track if we're transitioning to style (to keep content visible during transition)
   const [isTransitioningToStyle, setIsTransitioningToStyle] = useState(false);
-  
-  // #region agent log
-  console.log('[DEBUG H6/H7] CreatePost render state', { step, isTransitioningToStyle, willRenderContent: (step === "content" || isTransitioningToStyle), willRenderStyle: (step === "style" && !isTransitioningToStyle) });
-  // #endregion
   
   // Track if the step change came from user action (vs draft load)
   const isUserStepChange = useRef(false);
@@ -274,12 +266,10 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
 
       // Otherwise load draft
       const draft = await getPostDraft({ userId: ensuredUserId, promptId });
-      // #region agent log
-      console.log('[DEBUG H6] Draft loaded', { hasDraft: !!draft, draftStep: draft?.step, draftQuote: draft?.quote?.substring(0, 20) });
-      // #endregion
       if (cancelled) return;
       if (draft) {
-        setStep(draft.step);
+        // Always start at content step, regardless of where draft was saved
+        setStep("content");
         setQuote(draft.quote ?? "");
         setExpandedText(draft.expandedText ?? "");
         setBackground(draft.background ?? "dark");
@@ -480,6 +470,22 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
 
       if (__DEV__) console.log("[create-post] created", { id: created.id });
 
+      // Track post submission event
+      try {
+        await supabase.from("user_events").insert({
+          user_id: user.id,
+          event_type: "post_submit",
+          event_name: "post_submit",
+          metadata: {
+            post_id: created.id,
+            prompt_id: promptId ?? null,
+          },
+        });
+      } catch (error) {
+        // Non-critical
+        if (__DEV__) console.warn("[create-post] post_submit event tracking failed", error);
+      }
+
       // Dev reset-cycle sets a "has responded" override to false; once we successfully create
       // the response, clear that override so gating reflects the DB state.
       if (__DEV__ && user && promptId) {
@@ -561,8 +567,8 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
           </Animated.View>
         )}
 
-        {/* Style step - only render when step is style and not transitioning back */}
-        {step === "style" && !isTransitioningToStyle && (
+        {/* Style step - render when step is style (including during transition for animation) */}
+        {step === "style" && (
           <Animated.View
             className="flex-1 bg-background"
             style={{ 

@@ -98,7 +98,7 @@ export function LoadingScreen({
         >
           <View style={styles.logoWrap}>
             <Image
-              source={require("../assets/vibes/PONDER logo.png")}
+              source={require("../assets/vibes/ponder-logo.png")}
               accessibilityLabel="PONDER"
               style={styles.logo}
               resizeMode="contain"

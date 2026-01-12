@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "PONDER-native",
-    "slug": "PONDER-native",
+    "slug": "ponder",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -15,7 +15,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ponderapp.app"
+      "bundleIdentifier": "com.ponderapp.app",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +28,8 @@
         "backgroundColor": "#0a0a0a"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.ponderapp.app"
     },
     "web": {
       "bundler": "metro",
@@ -33,10 +39,25 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#0a0a0a",
+          "sounds": []
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "69f35256-0182-4a54-95ea-3722b607bb14"
+      },
+      "router": {}
+    },
+    "owner": "jaydenxias-organization"
   }
 }

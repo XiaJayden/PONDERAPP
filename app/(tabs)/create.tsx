@@ -18,10 +18,6 @@ export default function CreateScreen() {
     edit?: string;
   }>();
 
-  // #region agent log
-  console.log('[DEBUG H3/H4] CreateScreen rendered', { promptId: params.promptId, promptText: params.promptText?.substring(0, 30), promptDate: params.promptDate, hasPromptId: !!params.promptId, hasPromptText: !!params.promptText });
-  // #endregion
-
   const { user } = useAuth();
   const { addPostOptimistically, refetch } = useYimFeed();
   const cycleDateKey = getPacificIsoDateForCycleStart(new Date(), 6);
@@ -33,10 +29,6 @@ export default function CreateScreen() {
   });
 
   const pendingPost = pendingPostQ.data ?? null;
-
-  // #region agent log
-  console.log('[DEBUG H5] CreateScreen before return', { userId: user?.id?.substring(0, 8), hasUser: !!user, promptId: params.promptId, pendingPost: !!pendingPost });
-  // #endregion
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">

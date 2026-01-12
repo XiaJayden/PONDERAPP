@@ -58,18 +58,34 @@ export function BottomNav(props: BottomTabBarProps) {
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
 
   // In the posting/viewing cycle:
-  // - Before answering: plus opens the prompt popup
-  // - After answering in posting phase: pencil icon allows editing post
-  // - In viewing phase: eye icon previews today's post
-  const hasAnsweredToday = !!user && dailyPrompt.hasAnsweredToday;
-  const canOpenPrompt = !!user && !!dailyPrompt.prompt;
+  // - Posting day, before answering: plus opens the prompt popup
+  // - Posting day, after answering: pencil icon allows editing post
+  // - Viewing day, before answering: plus opens the prompt popup (for late response)
+  // - Viewing day, after answering: eye icon previews the viewing day post
   const isPostingPhase = phase.phase === "posting";
-  const showEditButton = hasAnsweredToday && isPostingPhase && !!feed.pendingPost;
-  const createEnabled = showEditButton || (hasAnsweredToday && !isPostingPhase && !!feed.pendingPost) || (!hasAnsweredToday && canOpenPrompt);
+  
+  // Use appropriate check based on phase
+  const hasAnsweredForPhase = isPostingPhase 
+    ? (!!user && dailyPrompt.hasAnsweredToday)
+    : feed.hasRespondedToViewingDay;
+  
+  // Use appropriate post based on phase
+  const relevantPost = isPostingPhase ? feed.pendingPost : feed.viewingDayPost;
+  
+  const canOpenPrompt = !!user && !!dailyPrompt.prompt;
+  
+  // Posting day + answered = pencil (edit)
+  const showEditButton = hasAnsweredForPhase && isPostingPhase && !!relevantPost;
+  // Viewing day + answered = eye (preview)
+  const showPreviewButton = hasAnsweredForPhase && !isPostingPhase && !!relevantPost;
+  // Not answered = plus (create/respond)
+  const showCreateButton = !hasAnsweredForPhase && canOpenPrompt;
+  
+  const createEnabled = showEditButton || showPreviewButton || showCreateButton;
 
   return (
     <View className="bg-transparent">
-      <PostPreviewModal isVisible={isPreviewOpen} post={feed.pendingPost ?? null} onClose={() => setIsPreviewOpen(false)} />
+      <PostPreviewModal isVisible={isPreviewOpen} post={relevantPost ?? null} onClose={() => setIsPreviewOpen(false)} />
 
       <View 
         style={{ 
@@ -94,11 +110,11 @@ export function BottomNav(props: BottomTabBarProps) {
           <CreateButton
             isActive={currentRoute.name === "create"}
             isEnabled={createEnabled}
-            variant={showEditButton ? "edit" : hasAnsweredToday ? "preview" : "create"}
+            variant={showEditButton ? "edit" : showPreviewButton ? "preview" : "create"}
             onPress={() => {
               if (showEditButton) {
-                // Navigate to edit existing post
-                if (!feed.pendingPost) {
+                // Navigate to edit existing post (posting day only)
+                if (!relevantPost) {
                   Alert.alert("No post found", "You haven't submitted today's post yet.");
                   return;
                 }
@@ -112,22 +128,24 @@ export function BottomNav(props: BottomTabBarProps) {
                     promptId: dailyPrompt.prompt.id,
                     promptText: dailyPrompt.prompt.prompt_text,
                     promptDate: dailyPrompt.prompt.prompt_date,
-                    postId: feed.pendingPost.id,
+                    postId: relevantPost.id,
                     edit: "true",
                   },
                 });
                 return;
               }
 
-              if (hasAnsweredToday) {
-                if (!feed.pendingPost) {
-                  Alert.alert("No pending post", "You haven't submitted today's post yet.");
+              if (showPreviewButton) {
+                // Show preview of viewing day post (viewing day only)
+                if (!relevantPost) {
+                  Alert.alert("No post found", "You haven't submitted a post yet.");
                   return;
                 }
                 setIsPreviewOpen(true);
                 return;
               }
 
+              // Create new post
               if (!canOpenPrompt) return;
               devTools.openPromptPopup();
             }}

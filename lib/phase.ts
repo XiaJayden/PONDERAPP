@@ -2,18 +2,18 @@
  * Posting/Viewing day phase calculation.
  *
  * Phases alternate every 24 hours at 6AM Pacific:
- * - Posting days: Jan 12, 14, 16, 18... (even days from anchor)
- * - Viewing days: Jan 13, 15, 17, 19... (odd days from anchor)
+ * - Posting days: Jan 13, 15, 17, 19... (even days from anchor)
+ * - Viewing days: Jan 14, 16, 18, 20... (odd days from anchor)
  *
- * Anchor: January 12, 2026 at 6:00 AM Pacific (first posting day)
+ * Anchor: January 13, 2026 at 6:00 AM Pacific (first posting day)
  */
 
-import { pacificWallTimeToUtc, getPartsInTimeZone } from "./timezone";
+import { getPartsInTimeZone, pacificWallTimeToUtc } from "./timezone";
 
 export type Phase = "posting" | "viewing";
 
 const PACIFIC_TZ = "America/Los_Angeles";
-const PHASE_ANCHOR_DATE = "2026-01-12"; // First posting day
+const PHASE_ANCHOR_DATE = "2026-01-13"; // First posting day
 const PHASE_FLIP_HOUR = 6; // 6AM Pacific
 
 export interface PhaseInfo {
@@ -28,7 +28,7 @@ export interface PhaseInfo {
  * Even days from anchor = posting, odd days = viewing.
  */
 export function getCurrentPhase(now: Date = new Date()): Phase {
-  const anchor = pacificWallTimeToUtc({ year: 2026, month: 1, day: 12, hour: 6, minute: 0 });
+  const anchor = pacificWallTimeToUtc({ year: 2026, month: 1, day: 13, hour: 6, minute: 0 });
   const nowPacific = getPartsInTimeZone(now, PACIFIC_TZ);
 
   // Find the most recent 6AM PT boundary

@@ -15,6 +15,7 @@ import { LoadingScreen } from '@/components/LoadingScreen';
 import { PreloadProvider, usePreload } from '@/providers/preload-provider';
 import { DevToolsProvider } from "@/providers/dev-tools-provider";
 import { DevToolsPanel } from "@/components/dev/dev-tools-panel";
+import { useNotifications } from '@/hooks/useNotifications';
 import { BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue';
 import { Inter_400Regular, Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import { SpaceMono_400Regular, SpaceMono_700Bold } from '@expo-google-fonts/space-mono';
@@ -96,6 +97,7 @@ function RootLayoutNav() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <NotificationsInitializer />
         <DevToolsProvider>
           <PreloadProvider>
             <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
@@ -116,6 +118,11 @@ function RootLayoutNav() {
       </AuthProvider>
     </QueryClientProvider>
   );
+}
+
+function NotificationsInitializer() {
+  useNotifications(); // Initialize push notifications (must be inside AuthProvider)
+  return null;
 }
 
 function PreloadLoadingGate({ children }: { children: React.ReactNode }) {

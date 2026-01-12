@@ -62,6 +62,36 @@ export function DevToolsPanel() {
               </Pressable>
             </View>
 
+            {/* Show All Posts toggle */}
+            <Pressable
+              onPress={() => devTools.setShowAllPosts(!devTools.showAllPosts)}
+              className={`mb-2 w-[140px] rounded-xl px-3 py-2 ${devTools.showAllPosts ? "bg-primary" : "bg-muted"}`}
+            >
+              <Text className={`font-mono text-xs uppercase tracking-wider ${devTools.showAllPosts ? "text-background" : "text-foreground"}`}>
+                {devTools.showAllPosts ? "All Posts ✓" : "All Posts"}
+              </Text>
+            </Pressable>
+
+            {/* Welcome screen controls */}
+            <View className="mb-2 gap-2">
+              <Pressable
+                onPress={() => void devTools.showWelcome()}
+                className="w-[140px] rounded-xl bg-primary px-3 py-2"
+              >
+                <Text className="font-mono text-xs uppercase tracking-wider text-background">
+                  Show Welcome
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void devTools.resetWelcome()}
+                className="w-[140px] rounded-xl bg-muted px-3 py-2"
+              >
+                <Text className="font-mono text-xs uppercase tracking-wider text-foreground">
+                  Reset Welcome
+                </Text>
+              </Pressable>
+            </View>
+
             <View className="gap-2">
               {items.map((it) => {
                 return (

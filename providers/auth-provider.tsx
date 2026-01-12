@@ -11,9 +11,35 @@ WebBrowser.maybeCompleteAuthSession();
 function getOAuthRedirectUrl() {
   // IMPORTANT:
   // - Custom scheme redirects require a Dev Client / standalone build (not Expo Go).
-  // - We keep this path stable so you can whitelist it in Supabase Redirect URLs.
+  // - This URL MUST be added to Supabase Dashboard:
+  //   Authentication → URL Configuration → Redirect URLs
+  //   Add: PONDERnative://auth/callback
+  // - Without this, Supabase will redirect to your site URL instead of the app.
   const scheme = "PONDERnative"; // keep in sync with `app.json` -> expo.scheme
-  return Linking.createURL("auth/callback", { scheme }); // e.g. PONDERnative://auth/callback
+  const redirectUrl = Linking.createURL("auth/callback", { scheme }); // e.g. PONDERnative://auth/callback
+  return redirectUrl;
+}
+
+function getEmailRedirectUrl() {
+  // For email confirmation, we need a WEB URL that then redirects to the app.
+  // Custom schemes (PONDERnative://) can't be opened directly from server redirects.
+  //
+  // Set EXPO_PUBLIC_SITE_URL to your hosted web URL (e.g., https://yourapp.com)
+  // The web page at /auth/callback will redirect to the native app.
+  const siteUrl = process.env.EXPO_PUBLIC_SITE_URL;
+
+  if (!siteUrl) {
+    if (__DEV__) {
+      console.warn(
+        "[auth] EXPO_PUBLIC_SITE_URL not set. Email confirmation links will redirect to Supabase Site URL.\n" +
+          "Set EXPO_PUBLIC_SITE_URL to your web URL (e.g., https://yourapp.com) for proper app redirects."
+      );
+    }
+    // Fall back to native scheme (won't work for email, but will work for OAuth)
+    return getOAuthRedirectUrl();
+  }
+
+  return `${siteUrl}/auth/callback`;
 }
 
 async function exchangeCodeFromUrl(url: string) {
@@ -40,6 +66,7 @@ interface AuthContextValue {
   session: Session | null;
   isLoading: boolean;
   errorMessage: string | null;
+  isEmailConfirmed: boolean;
 
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
@@ -123,7 +150,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function signUp(email: string, password: string) {
     setErrorMessage(null);
 
-    const { error } = await supabase.auth.signUp({ email, password });
+    const emailRedirectTo = getEmailRedirectUrl();
+
+    if (__DEV__) {
+      console.log("[auth] signUp emailRedirectTo", { emailRedirectTo });
+    }
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        // This tells Supabase where to redirect after email confirmation.
+        // Must be a WEB URL that then redirects to the native app.
+        emailRedirectTo,
+      },
+    });
     if (error) {
       console.error("[auth] signUp failed", error);
       setErrorMessage(error.message);
@@ -136,6 +177,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { error } = await supabase.auth.signOut();
     if (error) {
+      // If there's no session, the user is effectively already logged out - not an error
+      if (error.name === "AuthSessionMissingError") {
+        if (__DEV__) console.log("[auth] signOut: no session to sign out from (already logged out)");
+        setSession(null);
+        return;
+      }
       console.error("[auth] signOut failed", error);
       setErrorMessage(error.message);
       throw error;
@@ -147,7 +194,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const redirectTo = getOAuthRedirectUrl();
 
-    if (__DEV__) console.log("[auth] signInWithGoogle redirectTo", { redirectTo });
+    if (__DEV__) {
+      console.log("[auth] signInWithGoogle redirectTo", { redirectTo });
+      console.log("[auth] IMPORTANT: Ensure this URL is in Supabase Dashboard → Authentication → URL Configuration → Redirect URLs:", redirectTo);
+    }
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -186,18 +236,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // Check if the user's email is confirmed
+  const isEmailConfirmed = Boolean(session?.user?.email_confirmed_at);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user: session?.user ?? null,
       session,
       isLoading,
       errorMessage,
+      isEmailConfirmed,
       signIn,
       signUp,
       signOut,
       signInWithGoogle,
     }),
-    [session, isLoading, errorMessage]
+    [session, isLoading, errorMessage, isEmailConfirmed]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

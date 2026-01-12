@@ -3,11 +3,12 @@ import { FlatList, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ExpandedPostModal } from "@/components/posts/expanded-post-modal";
+import { PostHeader } from "@/components/posts/post-chrome";
 import { YimPost, type Post } from "@/components/posts/yim-post";
-import { useGallery } from "@/hooks/useGallery";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
 
 export default function GalleryScreen() {
-  const { posts, isLoading } = useGallery();
+  const { posts, isLoading } = useSavedPosts();
   const [expandedPost, setExpandedPost] = useState<Post | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -141,19 +142,13 @@ export default function GalleryScreen() {
               </View>
             ) : null}
 
-            {/* Plaque */}
+            {/* Author Info */}
             {activePost ? (
               <View className="mt-8 rounded-2xl border border-muted bg-card p-5">
-                {!!activePost.promptId ? (
-                  <View className="gap-2">
-                    <Text className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Prompt</Text>
-                    <Text className="font-body text-sm text-muted-foreground">
-                      {activePost.promptId}
-                    </Text>
-                  </View>
-                ) : null}
-
-                <View className="mt-4 gap-2">
+                <View className="mb-4">
+                  <PostHeader post={activePost} />
+                </View>
+                <View className="gap-2">
                   <Text className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Date</Text>
                   <Text className="font-mono text-sm text-foreground">{activePost.date}</Text>
                 </View>

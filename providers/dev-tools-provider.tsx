@@ -10,6 +10,7 @@ import { type Phase } from "@/lib/phase";
 import { supabase } from "@/lib/supabase";
 import { getTodayPacificIsoDate } from "@/lib/timezone";
 import { useAuth } from "@/providers/auth-provider";
+import { clearWelcomeSeen } from "@/lib/welcome-store";
 
 type DevToolsContextValue = {
   isPromptPopupVisible: boolean;
@@ -20,6 +21,12 @@ type DevToolsContextValue = {
 
   phaseOverride: Phase | null;
   setPhaseOverride: (phase: Phase | null) => void;
+
+  showAllPosts: boolean;
+  setShowAllPosts: (value: boolean) => void;
+
+  showWelcome: () => Promise<void>;
+  resetWelcome: () => Promise<void>;
 };
 
 const DevToolsContext = createContext<DevToolsContextValue | null>(null);
@@ -40,6 +47,7 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
 
   const [isPromptPopupVisible, setIsPromptPopupVisible] = useState(false);
   const [phaseOverride, setPhaseOverride] = useState<Phase | null>(null);
+  const [showAllPosts, setShowAllPosts] = useState(false);
 
   const openPromptPopup = useCallback(() => {
     if (!dailyPrompt.prompt) {
@@ -94,6 +102,27 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
     console.log("[resetCycle] Complete");
   }, [dailyPrompt.prompt, queryClient, user?.id]);
 
+  const showWelcome = useCallback(async () => {
+    if (!__DEV__) return;
+    if (!user?.id) {
+      Alert.alert("No user", "Please log in first.");
+      return;
+    }
+    await clearWelcomeSeen(user.id);
+    // Navigate to welcome screen
+    router.push("/(auth)/welcome");
+  }, [user?.id]);
+
+  const resetWelcome = useCallback(async () => {
+    if (!__DEV__) return;
+    if (!user?.id) {
+      Alert.alert("No user", "Please log in first.");
+      return;
+    }
+    await clearWelcomeSeen(user.id);
+    Alert.alert("Welcome reset", "Welcome screen flag has been cleared. Navigate to welcome screen to see it again.");
+  }, [user?.id]);
+
   const value = useMemo<DevToolsContextValue>(
     () => ({
       isPromptPopupVisible,
@@ -102,6 +131,10 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
       resetCycle,
       phaseOverride,
       setPhaseOverride,
+      showAllPosts,
+      setShowAllPosts,
+      showWelcome,
+      resetWelcome,
     }),
     [
       closePromptPopup,
@@ -110,6 +143,9 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
       resetCycle,
       phaseOverride,
       setPhaseOverride,
+      showAllPosts,
+      showWelcome,
+      resetWelcome,
     ]
   );
 
@@ -124,13 +160,7 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
           prompt={dailyPrompt.prompt}
           onClose={closePromptPopup}
           onRespond={() => {
-            // #region agent log
-            console.log('[DEBUG H1] onRespond called', { promptId: dailyPrompt.prompt?.id, promptText: dailyPrompt.prompt?.prompt_text?.substring(0, 30), promptDate: dailyPrompt.prompt?.prompt_date, hasPrompt: !!dailyPrompt.prompt });
-            // #endregion
             closePromptPopup();
-            // #region agent log
-            console.log('[DEBUG H1] after closePromptPopup, navigating to create');
-            // #endregion
             router.replace({
               pathname: "/(tabs)/create",
               params: {
@@ -139,9 +169,6 @@ export function DevToolsProvider({ children }: { children: React.ReactNode }) {
                 promptDate: dailyPrompt.prompt!.prompt_date,
               },
             });
-            // #region agent log
-            console.log('[DEBUG H1] router.replace called');
-            // #endregion
           }}
         />
       ) : null}

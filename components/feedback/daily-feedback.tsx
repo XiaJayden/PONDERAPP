@@ -29,15 +29,12 @@ export function DailyFeedback() {
         feedbackDate,
       };
 
-      const { error } = await supabase.from("user_feedback").upsert(
-        {
-          user_id: user.id,
-          feedback_date: feedbackDate,
-          rating,
-          responses,
-        },
-        { onConflict: "user_id,feedback_date" }
-      );
+      const { error } = await supabase.from("user_feedback").insert({
+        user_id: user.id,
+        feedback_date: feedbackDate,
+        rating,
+        responses,
+      });
 
       if (error) throw error;
 

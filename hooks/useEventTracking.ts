@@ -9,6 +9,10 @@ export type UserEventType =
   | "session_start"
   | "session_end"
   | "feedback_submit"
+  | "app_open"
+  | "post_submit"
+  | "post_created"
+  | "like_post"
   | string;
 
 export function useEventTracking() {

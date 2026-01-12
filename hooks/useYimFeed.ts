@@ -15,7 +15,7 @@ import { useAuth } from "@/providers/auth-provider";
  * - Keeps debug logs to make Supabase/RLS issues easier to diagnose.
  */
 
-interface YimPostRow {
+export interface YimPostRow {
   id: string;
   author_id: string;
   quote: string;
@@ -112,7 +112,7 @@ async function createSignedUrlForAvatarPath(path: string) {
   return data.signedUrl;
 }
 
-async function hydrateSignedUrls(rows: YimPostRow[]) {
+export async function hydrateSignedUrls(rows: YimPostRow[]) {
   const map = new Map<string, string>();
   const paths = rows.map((r) => r.photo_background_url).filter(Boolean) as string[];
   if (paths.length === 0) return map;
@@ -140,7 +140,7 @@ type AuthorInfo = {
   authorAvatarUrl?: string;
 };
 
-async function hydrateAuthorInfo(authorIds: string[]) {
+export async function hydrateAuthorInfo(authorIds: string[]) {
   const map = new Map<string, AuthorInfo>();
   if (authorIds.length === 0) return map;
 
@@ -183,7 +183,7 @@ function formatPostDate(createdAt: string) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function mapRowToPost(row: YimPostRow, signedUrlMap: Map<string, string>, authorInfoMap: Map<string, AuthorInfo>): Post {
+export function mapRowToPost(row: YimPostRow, signedUrlMap: Map<string, string>, authorInfoMap: Map<string, AuthorInfo>): Post {
   const bg: BackgroundType = isAllowedBackground(row.background) ? row.background : "dark";
   const font = isAllowedFontStyle(row.font) ? row.font : undefined;
   const fontColor = isAllowedFontColor(row.font_color) ? row.font_color : undefined;
@@ -232,6 +232,11 @@ export interface CreateYimPostInput {
   promptDate?: string; // YYYY-MM-DD
 }
 
+function countWords(text: string | null | undefined): number {
+  if (!text || !text.trim()) return 0;
+  return text.trim().split(/\s+/).filter((word) => word.length > 0).length;
+}
+
 export async function createYimPost(input: CreateYimPostInput): Promise<Post> {
   const {
     data: { user },
@@ -240,6 +245,9 @@ export async function createYimPost(input: CreateYimPostInput): Promise<Post> {
 
   if (userError) throw userError;
   if (!user) throw new Error("[createYimPost] Must be authenticated");
+
+  // Calculate word count from quote and expandedText
+  const wordCount = countWords(input.quote) + countWords(input.expandedText);
 
   const insertData: Record<string, unknown> = {
     author_id: user.id,
@@ -253,6 +261,7 @@ export async function createYimPost(input: CreateYimPostInput): Promise<Post> {
     expanded_text: input.expandedText ?? null,
     prompt_id: input.promptId ?? null,
     prompt_date: input.promptDate ?? (input.promptId ? getTodayPacificIsoDate() : null),
+    word_count: wordCount,
   };
 
   if (input.photoBackgroundPath) insertData.photo_background_url = input.photoBackgroundPath;
@@ -263,7 +272,7 @@ export async function createYimPost(input: CreateYimPostInput): Promise<Post> {
     .from("yim_posts")
     .insert(insertData)
     .select(
-      "id, author_id, quote, attribution, background, font, font_color, font_size, text_highlight, photo_background_url, expanded_text, prompt_id, prompt_date, created_at"
+      "id, author_id, quote, attribution, background, font, font_color, font_size, text_highlight, photo_background_url, expanded_text, prompt_id, prompt_date, word_count, created_at"
     )
     .single();
 
@@ -272,7 +281,26 @@ export async function createYimPost(input: CreateYimPostInput): Promise<Post> {
 
   const signedUrlMap = await hydrateSignedUrls([data as YimPostRow]);
   const authorInfoMap = await hydrateAuthorInfo([(data as YimPostRow).author_id]);
-  return mapRowToPost(data as YimPostRow, signedUrlMap, authorInfoMap);
+  const post = mapRowToPost(data as YimPostRow, signedUrlMap, authorInfoMap);
+
+  // Track post creation event
+  try {
+    await supabase.from("user_events").insert({
+      user_id: user.id,
+      event_type: "post_created",
+      event_name: "post_created",
+      metadata: {
+        post_id: post.id,
+        prompt_id: input.promptId ?? null,
+        word_count: wordCount,
+      },
+    });
+  } catch (error) {
+    // Non-critical, just log
+    if (__DEV__) console.warn("[createYimPost] event tracking failed", error);
+  }
+
+  return post;
 }
 
 export async function updatePostExpandedText(params: { postId: string; expandedText: string }) {
@@ -304,6 +332,40 @@ function addDaysToIsoDate(isoDate: string, deltaDays: number) {
 
 export function yimFeedQueryKey(userId: string, promptDate: string) {
   return ["yimFeed", userId, promptDate] as const;
+}
+
+export function allPostsFeedQueryKey(userId: string) {
+  return ["yimFeed", userId, "all"] as const;
+}
+
+export async function fetchAllPosts(userId: string): Promise<Post[]> {
+  // Fetch ALL posts for user + friends (ignores date filter - for dev testing)
+  const authorIds = await fetchAuthorIdsForUser(userId);
+
+  let query = supabase
+    .from("yim_posts")
+    .select(
+      "id, author_id, quote, attribution, background, font, font_color, font_size, text_highlight, photo_background_url, expanded_text, prompt_id, prompt_date, created_at"
+    )
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (authorIds.length > 0) query = query.in("author_id", authorIds);
+
+  const { data: rows, error } = await query;
+  if (error) throw error;
+
+  if (__DEV__) {
+    console.log("[fetchAllPosts] found", rows?.length ?? 0, "posts");
+    rows?.forEach((r: any) => console.log("[fetchAllPosts] post", { id: r.id, prompt_date: r.prompt_date, author_id: r.author_id }));
+  }
+
+  const signedUrlMap = await hydrateSignedUrls((rows ?? []) as YimPostRow[]);
+  const authorIdsForProfiles = Array.from(
+    new Set(((rows ?? []) as YimPostRow[]).map((r) => r.author_id).filter(Boolean))
+  );
+  const authorInfoMap = await hydrateAuthorInfo(authorIdsForProfiles);
+  return ((rows ?? []) as YimPostRow[]).map((r) => mapRowToPost(r, signedUrlMap, authorInfoMap));
 }
 
 export function pendingPostQueryKey(userId: string, promptDate: string) {
@@ -393,7 +455,7 @@ export async function fetchUserPosts(userId: string): Promise<Post[]> {
   return ((rows ?? []) as YimPostRow[]).map((r) => mapRowToPost(r, signedUrlMap, authorInfoMap));
 }
 
-export function useYimFeed() {
+export function useYimFeed(showAllPosts: boolean = false) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isHardRefreshing, setIsHardRefreshing] = useState(false);
   const { user } = useAuth();
@@ -411,9 +473,14 @@ export function useYimFeed() {
     return () => clearInterval(id);
   }, []);
 
+
   const feedQ = useQuery({
-    queryKey: userId ? yimFeedQueryKey(userId, yesterdayDateKey) : ["yimFeed", "anonymous"],
-    queryFn: () => fetchYimFeed(userId as string, yesterdayDateKey),
+    queryKey: userId 
+      ? (showAllPosts ? allPostsFeedQueryKey(userId) : yimFeedQueryKey(userId, yesterdayDateKey))
+      : ["yimFeed", "anonymous"],
+    queryFn: () => showAllPosts 
+      ? fetchAllPosts(userId as string) 
+      : fetchYimFeed(userId as string, yesterdayDateKey),
     enabled: !!userId,
   });
 
@@ -423,19 +490,26 @@ export function useYimFeed() {
     enabled: !!userId,
   });
 
+  // Check if user has a post for yesterday (viewing day response)
+  const viewingDayPostQ = useQuery({
+    queryKey: userId ? pendingPostQueryKey(userId, yesterdayDateKey) : ["viewingDayPost", "anonymous"],
+    queryFn: () => fetchPendingPost(userId as string, yesterdayDateKey),
+    enabled: !!userId,
+  });
+
   const refetch = useCallback(
     async (forceRefresh = false) => {
       if (!userId) return;
       if (!forceRefresh) setIsRefreshing(true);
       else setIsHardRefreshing(true);
       try {
-        await Promise.allSettled([feedQ.refetch(), pendingQ.refetch()]);
+        await Promise.allSettled([feedQ.refetch(), pendingQ.refetch(), viewingDayPostQ.refetch()]);
       } finally {
         setIsRefreshing(false);
         setIsHardRefreshing(false);
       }
     },
-    [feedQ, pendingQ, userId]
+    [feedQ, pendingQ, viewingDayPostQ, userId]
   );
 
   const addPostOptimistically = useCallback(
@@ -448,6 +522,8 @@ export function useYimFeed() {
       }
       if (postPromptDate && postPromptDate === yesterdayDateKey) {
         queryClient.setQueryData<Post[]>(yimFeedQueryKey(userId, yesterdayDateKey), (prev) => [post, ...(prev ?? [])]);
+        // Also update the viewing day post cache
+        queryClient.setQueryData<Post | null>(pendingPostQueryKey(userId, yesterdayDateKey), () => post);
       }
     },
     [cycleDateKey, queryClient, userId, yesterdayDateKey]
@@ -456,14 +532,17 @@ export function useYimFeed() {
   return useMemo(() => {
     const errorMessage =
       (feedQ.error instanceof Error ? feedQ.error.message : feedQ.error ? String(feedQ.error) : null) ??
-      (pendingQ.error instanceof Error ? pendingQ.error.message : pendingQ.error ? String(pendingQ.error) : null);
+      (pendingQ.error instanceof Error ? pendingQ.error.message : pendingQ.error ? String(pendingQ.error) : null) ??
+      (viewingDayPostQ.error instanceof Error ? viewingDayPostQ.error.message : viewingDayPostQ.error ? String(viewingDayPostQ.error) : null);
     return {
       cycleDateKey,
       yesterdayDateKey,
       posts: feedQ.data ?? [],
       yesterdayPosts: feedQ.data ?? [],
       pendingPost: pendingQ.data ?? null,
-      isLoading: feedQ.isLoading || pendingQ.isLoading || isHardRefreshing,
+      viewingDayPost: viewingDayPostQ.data ?? null,
+      hasRespondedToViewingDay: !!viewingDayPostQ.data,
+      isLoading: feedQ.isLoading || pendingQ.isLoading || viewingDayPostQ.isLoading || isHardRefreshing,
       errorMessage,
       isRefreshing,
       refetch,
@@ -480,6 +559,9 @@ export function useYimFeed() {
     pendingQ.data,
     pendingQ.error,
     pendingQ.isLoading,
+    viewingDayPostQ.data,
+    viewingDayPostQ.error,
+    viewingDayPostQ.isLoading,
     refetch,
     yesterdayDateKey,
   ]);
