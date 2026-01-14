@@ -17,6 +17,7 @@ export default function LoginScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showVerifyEmail, setShowVerifyEmail] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // If user exists but email not confirmed, show verification popup
   useEffect(() => {
@@ -33,26 +34,48 @@ export default function LoginScreen() {
   );
 
   async function handleSubmit() {
-    if (!email.trim() || !password) return;
-    if (isSubmitting) return;
+    if (!email.trim() || !password) {
+      if (__DEV__) console.log("[login] ⚠️ Empty email or password, ignoring submit");
+      return;
+    }
+    if (isSubmitting) {
+      if (__DEV__) console.log("[login] ⚠️ Already submitting, ignoring");
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      if (__DEV__) console.log("[login] submit", { mode: authMode, email: email.trim() });
+      if (__DEV__) {
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("[login] 🚀 SUBMIT STARTED");
+        console.log("  mode:", authMode);
+        console.log("  email:", email.trim());
+        console.log("  password length:", password.length);
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      }
       if (authMode === "login") {
         await signIn(email.trim(), password);
+        if (__DEV__) console.log("[login] ✅ signIn completed without throwing");
       } else {
         await signUp(email.trim(), password);
-        // Show email verification popup after successful registration
-        setRegisteredEmail(email.trim());
-        setShowVerifyEmail(true);
+        if (__DEV__) console.log("[login] ✅ signUp completed without throwing");
+        // Email confirmation disabled - user will be logged in automatically
+        // Navigation happens via auth guards
       }
       setPassword("");
+      if (__DEV__) console.log("[login] ✅ Password cleared, waiting for auth guards to navigate...");
       // Navigation happens via auth guards (tabs layout).
     } catch (error) {
-      console.warn("[login] submit failed", error);
+      if (__DEV__) {
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("[login] ❌ SUBMIT FAILED");
+        console.log("  error:", error);
+        console.log("  errorMessage state should be updated by auth provider");
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      }
     } finally {
       setIsSubmitting(false);
+      if (__DEV__) console.log("[login] 🏁 Submit flow finished, isSubmitting = false");
     }
   }
 
@@ -136,15 +159,29 @@ export default function LoginScreen() {
                 textContentType="emailAddress"
                 className="rounded-xl border border-muted bg-background px-4 py-3 font-body text-base text-foreground"
               />
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Password"
-                placeholderTextColor="hsl(0 0% 55%)"
-                secureTextEntry
-                textContentType="password"
-                className="rounded-xl border border-muted bg-background px-4 py-3 font-body text-base text-foreground"
-              />
+              <View className="relative">
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Password"
+                  placeholderTextColor="hsl(0 0% 55%)"
+                  secureTextEntry={!showPassword}
+                  textContentType="password"
+                  className="rounded-xl border border-muted bg-background px-4 py-3 pr-12 font-body text-base text-foreground"
+                />
+                <Pressable
+                  onPress={() => setShowPassword(!showPassword)}
+                  className="absolute right-0 top-0 bottom-0 items-center justify-center px-4"
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                >
+                  <MaterialCommunityIcons
+                    name={showPassword ? "eye-off" : "eye"}
+                    size={20}
+                    color="hsl(0 0% 55%)"
+                  />
+                </Pressable>
+              </View>
 
               {!!errorMessage && <Text className="font-mono text-xs text-destructive">{errorMessage}</Text>}
 
@@ -173,6 +210,34 @@ export default function LoginScreen() {
               </Pressable>
             </View>
           </View>
+
+          {/* Dev Debug Panel */}
+          {__DEV__ && (
+            <View className="mt-4 rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3">
+              <Text className="font-mono text-xs text-yellow-500 mb-2">🔧 DEBUG INFO</Text>
+              <Text className="font-mono text-[10px] text-yellow-500/80">
+                isLoading: {String(isLoading)}
+              </Text>
+              <Text className="font-mono text-[10px] text-yellow-500/80">
+                hasUser: {String(!!user)}
+              </Text>
+              <Text className="font-mono text-[10px] text-yellow-500/80">
+                userId: {user?.id?.slice(0, 8) ?? "null"}...
+              </Text>
+              <Text className="font-mono text-[10px] text-yellow-500/80">
+                email: {user?.email ?? "null"}
+              </Text>
+              <Text className="font-mono text-[10px] text-yellow-500/80">
+                isEmailConfirmed: {String(isEmailConfirmed)}
+              </Text>
+              <Text className="font-mono text-[10px] text-yellow-500/80">
+                errorMessage: {errorMessage ?? "null"}
+              </Text>
+              <Text className="font-mono text-[10px] text-yellow-500/80">
+                isSubmitting: {String(isSubmitting)}
+              </Text>
+            </View>
+          )}
           
           <View className="flex-1" />
         </View>

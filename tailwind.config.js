@@ -13,6 +13,7 @@ module.exports = {
 
         // Post-only fonts
         playfair: ["PlayfairDisplay"],
+        "playfair-semibold": ["PlayfairDisplaySemiBold"],
         archivo: ["ArchivoBlack"],
         marker: ["PermanentMarker"],
         caveat: ["Caveat"],

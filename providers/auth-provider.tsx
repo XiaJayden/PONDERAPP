@@ -15,7 +15,7 @@ function getOAuthRedirectUrl() {
   //   Authentication → URL Configuration → Redirect URLs
   //   Add: PONDERnative://auth/callback
   // - Without this, Supabase will redirect to your site URL instead of the app.
-  const scheme = "PONDERnative"; // keep in sync with `app.json` -> expo.scheme
+  const scheme = "pondernative"; // keep in sync with `app.json` -> expo.scheme
   const redirectUrl = Linking.createURL("auth/callback", { scheme }); // e.g. PONDERnative://auth/callback
   return redirectUrl;
 }
@@ -39,7 +39,9 @@ function getEmailRedirectUrl() {
     return getOAuthRedirectUrl();
   }
 
-  return `${siteUrl}/auth/callback`;
+  // Remove trailing slash from siteUrl to avoid double slashes
+  const cleanSiteUrl = siteUrl.replace(/\/$/, "");
+  return `${cleanSiteUrl}/auth/callback`;
 }
 
 async function exchangeCodeFromUrl(url: string) {
@@ -85,28 +87,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let isCancelled = false;
 
     async function init() {
+      if (__DEV__) {
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("[auth] 🚀 INIT STARTED");
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      }
       try {
         // Handle cold-start deep links (e.g. after OAuth redirect).
         const initialUrl = await Linking.getInitialURL();
+        if (__DEV__) console.log("[auth] Initial URL:", initialUrl);
         if (initialUrl) {
           try {
             await exchangeCodeFromUrl(initialUrl);
+            if (__DEV__) console.log("[auth] ✅ Initial URL code exchange succeeded");
           } catch (e) {
-            if (__DEV__) console.warn("[auth] initial URL exchange failed", e);
+            if (__DEV__) console.warn("[auth] ⚠️ Initial URL exchange failed", e);
           }
         }
 
+        if (__DEV__) console.log("[auth] Getting existing session...");
         const { data, error } = await supabase.auth.getSession();
         if (isCancelled) return;
 
         if (error) {
-          console.warn("[auth] getSession failed", error);
+          console.warn("[auth] ❌ getSession failed", error);
           setErrorMessage(error.message);
+        }
+
+        if (__DEV__) {
+          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+          console.log("[auth] 📦 EXISTING SESSION CHECK");
+          console.log("  hasSession:", !!data.session);
+          if (data.session?.user) {
+            console.log("  user.id:", data.session.user.id);
+            console.log("  user.email:", data.session.user.email);
+            console.log("  user.email_confirmed_at:", data.session.user.email_confirmed_at);
+            console.log("  isEmailConfirmed:", Boolean(data.session.user.email_confirmed_at));
+          }
+          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         }
 
         setSession(data.session ?? null);
       } finally {
-        if (!isCancelled) setIsLoading(false);
+        if (!isCancelled) {
+          setIsLoading(false);
+          if (__DEV__) console.log("[auth] 🏁 INIT COMPLETE, isLoading = false");
+        }
       }
     }
 
@@ -114,7 +140,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: subscriptionData } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (isCancelled) return;
-      if (__DEV__) console.log("[auth] onAuthStateChange", { event: _event, hasSession: !!nextSession });
+      if (__DEV__) {
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("[auth] 🔄 onAuthStateChange");
+        console.log("  event:", _event);
+        console.log("  hasSession:", !!nextSession);
+        if (nextSession?.user) {
+          console.log("  user.id:", nextSession.user.id);
+          console.log("  user.email:", nextSession.user.email);
+          console.log("  user.email_confirmed_at:", nextSession.user.email_confirmed_at);
+          console.log("  isEmailConfirmed:", Boolean(nextSession.user.email_confirmed_at));
+        }
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      }
       setSession(nextSession);
     });
 
@@ -139,30 +177,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function signIn(email: string, password: string) {
     setErrorMessage(null);
 
+    if (__DEV__) {
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("[auth] 🔐 signIn STARTED");
+      console.log("  email:", email);
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    
+    if (__DEV__) {
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("[auth] 🔐 signIn RESPONSE");
+      console.log("  hasError:", !!error);
+      console.log("  hasData:", !!data);
+      console.log("  hasSession:", !!data?.session);
+      console.log("  hasUser:", !!data?.user);
+      if (error) {
+        console.log("  error.message:", error.message);
+        console.log("  error.status:", (error as any).status);
+        console.log("  error.name:", error.name);
+      }
+      if (data?.user) {
+        console.log("  user.id:", data.user.id);
+        console.log("  user.email:", data.user.email);
+        console.log("  user.email_confirmed_at:", data.user.email_confirmed_at);
+        console.log("  user.created_at:", data.user.created_at);
+        console.log("  user.updated_at:", data.user.updated_at);
+      }
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    }
+
     if (error) {
-      console.error("[auth] signIn failed", error);
+      console.error("[auth] ❌ signIn FAILED", error);
       setErrorMessage(error.message);
       throw error;
     }
 
-    // Debug: Log the user's email confirmation status
+    // Email confirmation check disabled - Supabase handles this via dashboard settings
     if (__DEV__) {
-      console.log("[auth] signIn success", {
-        userId: data.user?.id,
-        email: data.user?.email,
-        email_confirmed_at: data.user?.email_confirmed_at,
-        isEmailConfirmed: Boolean(data.user?.email_confirmed_at),
-      });
-    }
-
-    // Check if email is not confirmed and show helpful message
-    if (!data.user?.email_confirmed_at) {
-      console.warn("[auth] User logged in but email not confirmed");
-      setErrorMessage("Please confirm your email before logging in. Check your inbox for the verification link.");
-      // Sign out since they can't proceed without email confirmation
-      await supabase.auth.signOut();
-      throw new Error("Email not confirmed");
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("[auth] ✅ signIn SUCCESS");
+      console.log("  email_confirmed_at:", data.user?.email_confirmed_at ?? "null (confirmation disabled)");
+      console.log("  Navigation should happen via auth guards...");
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     }
   }
 
@@ -172,10 +230,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const emailRedirectTo = getEmailRedirectUrl();
 
     if (__DEV__) {
-      console.log("[auth] signUp emailRedirectTo", { emailRedirectTo });
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("[auth] 📝 signUp STARTED");
+      console.log("  email:", email);
+      console.log("  emailRedirectTo:", emailRedirectTo);
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     }
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -184,10 +246,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         emailRedirectTo,
       },
     });
+
+    if (__DEV__) {
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("[auth] 📝 signUp RESPONSE");
+      console.log("  hasError:", !!error);
+      console.log("  hasData:", !!data);
+      console.log("  hasSession:", !!data?.session);
+      console.log("  hasUser:", !!data?.user);
+      if (data?.user) {
+        console.log("  user.id:", data.user.id);
+        console.log("  user.email:", data.user.email);
+        console.log("  user.email_confirmed_at:", data.user.email_confirmed_at);
+        console.log("  user.identities:", data.user.identities?.length ?? 0);
+      }
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    }
+
     if (error) {
-      console.error("[auth] signUp failed", error);
+      console.error("[auth] ❌ signUp FAILED", error);
       setErrorMessage(error.message);
       throw error;
+    }
+
+    // Check if user already exists (Supabase returns user with empty identities array)
+    // This happens when someone tries to sign up with an existing email
+    if (data.user && (!data.user.identities || data.user.identities.length === 0)) {
+      if (__DEV__) {
+        console.log("[auth] ⚠️ User already exists - please login instead");
+      }
+      setErrorMessage("An account with this email already exists. Please login instead.");
+      throw new Error("User already exists");
+    }
+
+    // If we got a session back (email confirmation disabled), the user is auto-logged in
+    if (data.session) {
+      if (__DEV__) {
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("[auth] ✅ signUp SUCCESS - Auto logged in (email confirmation disabled)");
+        console.log("  Session will be set via onAuthStateChange");
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      }
+      // Session is already set by onAuthStateChange listener, navigation will happen automatically
+    } else {
+      if (__DEV__) {
+        console.log("[auth] ✅ signUp SUCCESS - Email confirmation required");
+        console.log("  User needs to click the link in their email");
+      }
     }
   }
 
@@ -255,8 +360,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // Check if the user's email is confirmed
-  const isEmailConfirmed = Boolean(session?.user?.email_confirmed_at);
+  // Email confirmation disabled - always treat as confirmed
+  // To re-enable: change to Boolean(session?.user?.email_confirmed_at)
+  const isEmailConfirmed = true;
 
   const value = useMemo<AuthContextValue>(
     () => ({

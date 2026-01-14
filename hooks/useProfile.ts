@@ -19,6 +19,10 @@ export function profileQueryKey(userId: string) {
 }
 
 export async function fetchProfile(userId: string): Promise<Profile | null> {
+  if (__DEV__) {
+    console.log("[useProfile] 🔍 Fetching profile for userId:", userId);
+  }
+
   const { data, error } = await supabase
     .from("profiles")
     .select("id, username, display_name, first_name, birthday, avatar_url, onboarding_complete")
@@ -27,8 +31,23 @@ export async function fetchProfile(userId: string): Promise<Profile | null> {
 
   if (error) {
     // Missing profile is expected for brand-new accounts.
-    if ((error as any).code === "PGRST116") return null;
+    if ((error as any).code === "PGRST116") {
+      if (__DEV__) console.log("[useProfile] 📭 No profile found (PGRST116) - this is normal for new users");
+      return null;
+    }
+    if (__DEV__) console.error("[useProfile] ❌ Error fetching profile:", error);
     throw error;
+  }
+
+  if (__DEV__) {
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("[useProfile] ✅ Profile fetched:");
+    console.log("  id:", data?.id);
+    console.log("  username:", data?.username);
+    console.log("  first_name:", data?.first_name);
+    console.log("  birthday:", data?.birthday);
+    console.log("  onboarding_complete:", data?.onboarding_complete);
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   }
 
   return (data ?? null) as Profile | null;

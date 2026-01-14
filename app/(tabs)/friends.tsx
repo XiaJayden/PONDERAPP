@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Share, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Share, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
@@ -91,7 +91,7 @@ export default function FriendsScreen() {
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
-      <View className="flex-1 px-4 pt-6 pb-24">
+      <ScrollView className="flex-1 px-4 pt-6" contentContainerClassName="pb-24">
         <View className="relative items-center justify-center">
           <Text className="font-display text-4xl text-foreground">Friends</Text>
           {!canUseFriends ? (
@@ -159,7 +159,7 @@ export default function FriendsScreen() {
             ))
           )}
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

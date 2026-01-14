@@ -27,11 +27,28 @@ export default function TabLayout() {
   }, [isAuthLoading, isProfileLoading, user, isEmailConfirmed, profile?.onboarding_complete, trackEvent]);
 
   useEffect(() => {
-    if (isAuthLoading) return;
+    if (__DEV__) {
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("[tabs-layout] 🔍 CHECKING AUTH STATE");
+      console.log("  isAuthLoading:", isAuthLoading);
+      console.log("  isProfileLoading:", isProfileLoading);
+      console.log("  hasUser:", !!user);
+      console.log("  userId:", user?.id);
+      console.log("  userEmail:", user?.email);
+      console.log("  isEmailConfirmed:", isEmailConfirmed);
+      console.log("  hasProfile:", !!profile);
+      console.log("  profile?.onboarding_complete:", profile?.onboarding_complete);
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    }
+
+    if (isAuthLoading) {
+      if (__DEV__) console.log("[tabs-layout] ⏳ Still loading auth, waiting...");
+      return;
+    }
     
     // No user at all - redirect to login
     if (!user) {
-      if (__DEV__) console.log("[tabs-layout] no user → redirecting to login");
+      if (__DEV__) console.log("[tabs-layout] 👤 No user → redirecting to /(auth)/login");
       router.replace("/(auth)/login");
       return;
     }
@@ -39,12 +56,15 @@ export default function TabLayout() {
     // User exists but email not confirmed - redirect to login
     // (they'll see the verification popup there)
     if (!isEmailConfirmed) {
-      if (__DEV__) console.log("[tabs-layout] email not confirmed → redirecting to login");
+      if (__DEV__) console.log("[tabs-layout] 📧 Email NOT confirmed → redirecting to /(auth)/login");
       router.replace("/(auth)/login");
       return;
     }
 
-    if (isProfileLoading) return;
+    if (isProfileLoading) {
+      if (__DEV__) console.log("[tabs-layout] ⏳ Still loading profile, waiting...");
+      return;
+    }
 
     const needsOnboarding =
       !profile ||
@@ -54,8 +74,10 @@ export default function TabLayout() {
       !profile.birthday;
 
     if (needsOnboarding) {
-      if (__DEV__) console.log("[tabs-layout] needs onboarding → redirecting", { hasProfile: !!profile });
+      if (__DEV__) console.log("[tabs-layout] 📝 Needs onboarding → redirecting to /(auth)/onboarding", { hasProfile: !!profile });
       router.replace("/(auth)/onboarding");
+    } else {
+      if (__DEV__) console.log("[tabs-layout] ✅ User fully authenticated and onboarded, staying in tabs");
     }
   }, [isAuthLoading, isProfileLoading, profile, user, isEmailConfirmed]);
 

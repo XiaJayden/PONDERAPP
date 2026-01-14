@@ -5,6 +5,7 @@ import { useAuth } from "@/providers/auth-provider";
 import React, { useEffect, useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { FormattedText } from "./formatted-text";
 
 export type PromptPopupPrompt = {
   id: string;
@@ -142,7 +143,7 @@ export function PromptPopup({
         >
           {/* Description text */}
           {!!prompt.explanation_text ? (
-            <Text style={styles.explainer}>{prompt.explanation_text}</Text>
+            <FormattedText style={styles.explainer} boldStyle={styles.boldText}>{prompt.explanation_text}</FormattedText>
           ) : (
             <Text style={styles.explainer}>Take a moment. Read slowly. Then answer honestly.</Text>
           )}
@@ -199,9 +200,9 @@ export function PromptPopup({
           showsVerticalScrollIndicator={false}
         >
           {/* Question text - centered */}
-          <Text style={[styles.question, { fontSize: questionFontSize.fontSize, lineHeight: questionFontSize.lineHeight }]}>
+          <FormattedText style={[styles.question, { fontSize: questionFontSize.fontSize, lineHeight: questionFontSize.lineHeight }]} boldStyle={styles.boldText}>
             {prompt.prompt_text}
-          </Text>
+          </FormattedText>
 
           {/* Feedback section */}
           <View style={styles.feedbackSection}>
@@ -447,6 +448,9 @@ const styles = StyleSheet.create({
   },
   thumbIconActive: {
     opacity: 1,
+  },
+  boldText: {
+    fontFamily: "PlayfairDisplaySemiBold",
   },
 });
 

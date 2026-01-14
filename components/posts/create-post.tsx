@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { YimPost, type BackgroundType, type FontColor, type FontSize, type FontStyle, type Post } from "@/components/posts/yim-post";
+import { FormattedText } from "@/components/prompts/formatted-text";
 import { didRespondQueryKey, useDailyPrompt } from "@/hooks/useDailyPrompt";
 import { createYimPost } from "@/hooks/useYimFeed";
 import { deletePostDraft, getPostDraft, setPostDraft } from "@/lib/post-draft";
@@ -150,6 +151,8 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
   const [isDraftLoaded, setIsDraftLoaded] = useState(false);
   const saveDraftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const submitInFlightRef = useRef(false);
+  const contentScrollRef = useRef<ScrollView>(null);
+  const [textInputHeight, setTextInputHeight] = useState(0);
 
   // Interactive swipe-back (Style -> Content)
   const swipeX = useRef(new Animated.Value(0)).current;
@@ -343,12 +346,18 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
 
   function renderContentBody(params?: { pointerEvents?: "none" | "auto" }) {
     return (
-      <ScrollView className="flex-1" contentContainerClassName="px-4 pt-8 pb-24" pointerEvents={params?.pointerEvents}>
+      <ScrollView 
+        ref={contentScrollRef}
+        className="flex-1" 
+        contentContainerClassName="px-4 pt-8 pb-24" 
+        pointerEvents={params?.pointerEvents}
+        keyboardShouldPersistTaps="handled"
+      >
         <View className="flex-1 gap-6">
           {promptText ? (
             <View className="gap-3">
               <Text className="font-mono text-sm uppercase tracking-wider text-primary">Today's PONDER</Text>
-              <Text className="font-playfair text-3xl leading-tight text-foreground">{promptText}</Text>
+              <FormattedText className="font-playfair text-3xl leading-tight text-foreground" boldClassName="font-playfair-semibold">{promptText}</FormattedText>
             </View>
           ) : null}
 
@@ -356,6 +365,14 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
             <TextInput
               value={expandedText}
               onChangeText={setExpandedText}
+              onContentSizeChange={(e) => {
+                const newHeight = e.nativeEvent.contentSize.height;
+                if (newHeight > textInputHeight) {
+                  // Content grew (new line added), scroll to bottom
+                  contentScrollRef.current?.scrollToEnd({ animated: true });
+                }
+                setTextInputHeight(newHeight);
+              }}
               placeholder="What do you think?"
               placeholderTextColor="hsl(0 0% 55%)"
               multiline
@@ -668,7 +685,7 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
               post={previewPost}
               editableQuote
               onChangeQuote={(t) => setQuote(t.slice(0, POST_MAX_CHARS))}
-              quotePlaceholder="Enter a caption here"
+              quotePlaceholder="Preview text of your PONDER"
               maxQuoteLength={POST_MAX_CHARS}
             />
 

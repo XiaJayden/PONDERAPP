@@ -20,7 +20,7 @@ export default function AuthCallbackPage() {
     const search = window.location.search;
 
     // Build the native app URL with the same params/hash
-    const nativeUrl = `PONDERnative://auth/callback${search}${hash}`;
+    const nativeUrl = `pondernative://auth/callback${search}${hash}`;
     setAppUrl(nativeUrl);
 
     // Try to open the app

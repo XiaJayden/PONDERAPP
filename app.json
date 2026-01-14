@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "PONDERnative",
+    "scheme": "pondernative",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -18,11 +18,12 @@
       "bundleIdentifier": "com.ponderapp.app",
       "infoPlist": {
         "UIBackgroundModes": [
+          "remote-notification",
           "remote-notification"
         ],
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "2"
+      "buildNumber": "4"
     },
     "android": {
       "adaptiveIcon": {
@@ -60,6 +61,12 @@
       },
       "router": {}
     },
-    "owner": "jaydenxias-organization"
+    "owner": "jaydenxias-organization",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/69f35256-0182-4a54-95ea-3722b607bb14"
+    }
   }
 }

@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, Text, View } from "react-native";
 
 import type { DailyPrompt } from "@/hooks/useDailyPrompt";
+import { FormattedText } from "./formatted-text";
 
 /**
  * Compact prompt card.
@@ -33,7 +34,7 @@ export function PromptCard({
         </Pressable>
       </View>
 
-      <Text className="mt-3 font-playfair text-2xl leading-tight text-foreground">{prompt.prompt_text}</Text>
+      <FormattedText className="mt-3 font-playfair text-2xl leading-tight text-foreground" boldClassName="font-playfair-semibold">{prompt.prompt_text}</FormattedText>
 
       <Pressable
         onPress={onRespond}

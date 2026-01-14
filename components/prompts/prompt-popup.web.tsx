@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, Text, View } from "react-native-web";
 
 import type { PromptPopupPrompt } from "./prompt-popup";
+import { FormattedText } from "./formatted-text.web";
 
 /**
  * Web-only version used by the dev dashboard preview.
@@ -36,13 +37,13 @@ export function PromptPopup({
             </View>
 
             {!!prompt.explanation_text ? (
-              <Text style={styles.explainer}>{prompt.explanation_text}</Text>
+              <FormattedText style={styles.explainer}>{prompt.explanation_text}</FormattedText>
             ) : (
               <Text style={styles.explainer}>Take a moment. Read slowly. Then answer honestly.</Text>
             )}
 
             <View style={styles.questionWrap}>
-              <Text style={styles.question}>{prompt.prompt_text}</Text>
+              <FormattedText style={styles.question}>{prompt.prompt_text}</FormattedText>
 
               <Pressable onPress={onRespond} style={styles.respondButton}>
                 <Text style={styles.respondText}>Respond</Text>

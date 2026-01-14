@@ -11,6 +11,7 @@ import { BlurredPost } from "@/components/posts/blurred-post";
 import { YimPost, type Post } from "@/components/posts/yim-post";
 import { AnsweringStateCountdown } from "@/components/dev/answering-countdown";
 import { PromptPopup } from "@/components/prompts/prompt-popup";
+import { FormattedText } from "@/components/prompts/formatted-text";
 import { dailyPromptForDateQueryKey, fetchPromptForDate, useDailyPrompt } from "@/hooks/useDailyPrompt";
 import { usePhase } from "@/hooks/usePhase";
 import { useYimFeed } from "@/hooks/useYimFeed";
@@ -147,9 +148,9 @@ export default function FeedScreen() {
                   accessibilityLabel="Today's prompt"
                 >
                   <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Today's PONDER</Text>
-                  <Text className="mt-3 font-playfair text-2xl leading-tight text-foreground">
+                  <FormattedText className="mt-3 font-playfair text-2xl leading-tight text-foreground" boldClassName="font-playfair-semibold">
                     {dailyPrompt.prompt.prompt_text}
-                  </Text>
+                  </FormattedText>
 
                   {!hasAnsweredToday ? (
                     <Pressable
@@ -201,9 +202,9 @@ export default function FeedScreen() {
                   accessibilityLabel="Yesterday's prompt"
                 >
                   <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Yesterday's PONDER</Text>
-                  <Text className="mt-3 font-playfair text-2xl leading-tight text-foreground">
+                  <FormattedText className="mt-3 font-playfair text-2xl leading-tight text-foreground" boldClassName="font-playfair-semibold">
                     {displayPrompt.prompt_text}
-                  </Text>
+                  </FormattedText>
 
                   {!hasAnsweredToday ? (
                     <Pressable

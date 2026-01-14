@@ -1,6 +1,35 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 
+/**
+ * Parse text with **bold** markers and render as React elements.
+ */
+function renderFormattedText(text: string, style?: React.CSSProperties): React.ReactNode {
+  const regex = /\*\*(.+?)\*\*/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    parts.push(
+      <strong key={key++} style={{ fontWeight: 700 }}>
+        {match[1]}
+      </strong>
+    );
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length === 1 && typeof parts[0] === "string" ? text : <span style={style}>{parts}</span>;
+}
+
 // Local type definition (same as external prompt-popup.tsx) to avoid type-checking external RN files
 export type PromptPopupPrompt = {
   id: string;
@@ -45,13 +74,13 @@ export function PromptPopup({
             </div>
 
             {!!prompt.explanation_text ? (
-              <div style={styles.explainer}>{prompt.explanation_text}</div>
+              <div style={styles.explainer}>{renderFormattedText(prompt.explanation_text)}</div>
             ) : (
               <div style={styles.explainer}>Take a moment. Read slowly. Then answer honestly.</div>
             )}
 
             <div style={styles.questionWrap}>
-              <div style={styles.question}>{prompt.prompt_text}</div>
+              <div style={styles.question}>{renderFormattedText(prompt.prompt_text)}</div>
 
               <button onClick={onRespond} style={styles.respondButton} type="button">
                 <span style={styles.respondText}>Respond</span>
