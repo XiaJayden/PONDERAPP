@@ -1,6 +1,6 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Bell } from "lucide-react-native";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Alert, Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
@@ -32,9 +32,19 @@ export default function FeedScreen() {
   const feed = useYimFeed(devTools.showAllPosts);
   const phase = usePhase(devTools.phaseOverride);
   const { unreadCount } = useActivity();
+  const { showPrompt } = useLocalSearchParams<{ showPrompt?: string }>();
 
   const [expandedPost, setExpandedPost] = useState<Post | null>(null);
   const [isPromptPopupVisible, setIsPromptPopupVisible] = useState(false);
+
+  // Auto-open prompt popup when returning from the create flow with ?showPrompt=1
+  useEffect(() => {
+    if (showPrompt === "1") {
+      setIsPromptPopupVisible(true);
+      // Optional: clear the param so re-renders don't re-open
+      router.replace("/(tabs)");
+    }
+  }, [showPrompt]);
 
   // For posting day: check if user responded to today's prompt
   // For viewing day: use dedicated query to check if user has a post for yesterday

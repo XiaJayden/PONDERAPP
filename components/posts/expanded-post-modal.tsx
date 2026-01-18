@@ -85,7 +85,6 @@ export function ExpandedPostModal({
 
               {/* Comments Section */}
               <View className="mt-6">
-                <Text className="mb-4 font-mono text-xs uppercase tracking-wider text-muted-foreground">Comments</Text>
                 <CommentSection postId={post.id} />
               </View>
             </ScrollView>

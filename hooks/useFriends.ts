@@ -204,6 +204,36 @@ export async function deleteFriendship(friendId: string) {
   if (error) throw error;
 }
 
+/**
+ * Batch check which friends have responded to a specific prompt.
+ * Returns a Set of friend IDs who have responded.
+ */
+export async function checkFriendsResponseStatus(params: { friendIds: string[]; promptId: string }): Promise<Set<string>> {
+  const { friendIds, promptId } = params;
+
+  if (friendIds.length === 0) return new Set();
+
+  // Query all posts for these friends with this prompt ID
+  const { data, error } = await supabase
+    .from("yim_posts")
+    .select("author_id")
+    .in("author_id", friendIds)
+    .eq("prompt_id", promptId);
+
+  if (error) {
+    console.warn("[checkFriendsResponseStatus] failed", error);
+    return new Set();
+  }
+
+  // Return set of friend IDs who have responded
+  const respondedIds = new Set<string>();
+  (data ?? []).forEach((row: any) => {
+    if (row.author_id) respondedIds.add(row.author_id);
+  });
+
+  return respondedIds;
+}
+
 
 
 

@@ -1,28 +1,69 @@
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Share, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Share, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
+  checkFriendsResponseStatus,
   createFriendInvitation,
   deleteFriendship,
   getMyInvitations,
   useFriends,
   type FriendInvitation,
 } from "@/hooks/useFriends";
+import { useDailyPrompt } from "@/hooks/useDailyPrompt";
 import { useAuth } from "@/providers/auth-provider";
 import * as Linking from "expo-linking";
 
 export default function FriendsScreen() {
   const { user } = useAuth();
   const { friends, isLoading, errorMessage, refetch } = useFriends();
+  const { prompt } = useDailyPrompt();
 
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [activeInvites, setActiveInvites] = useState<FriendInvitation[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [respondedFriendIds, setRespondedFriendIds] = useState<Set<string>>(new Set());
+  const [isCheckingResponses, setIsCheckingResponses] = useState(false);
+  const [menuOpenFriendId, setMenuOpenFriendId] = useState<string | null>(null);
 
   const canUseFriends = !!user;
+
+  // Check which friends have responded to today's prompt
+  useEffect(() => {
+    if (!prompt || !prompt.id || friends.length === 0) {
+      setRespondedFriendIds(new Set());
+      return;
+    }
+
+    const promptId = prompt.id; // Capture promptId outside async function for TypeScript
+    let cancelled = false;
+    async function checkResponses() {
+      setIsCheckingResponses(true);
+      try {
+        const friendIds = friends.map((f) => f.id);
+        const responded = await checkFriendsResponseStatus({
+          friendIds,
+          promptId,
+        });
+        if (!cancelled) {
+          setRespondedFriendIds(responded);
+        }
+      } catch (error) {
+        console.error("[friends] check responses failed", error);
+      } finally {
+        if (!cancelled) {
+          setIsCheckingResponses(false);
+        }
+      }
+    }
+
+    void checkResponses();
+    return () => {
+      cancelled = true;
+    };
+  }, [prompt?.id, friends]);
 
   useEffect(() => {
     if (!user) return;
@@ -80,6 +121,7 @@ export default function FriendsScreen() {
 
   async function handleDeleteFriend(friendId: string) {
     setActionError(null);
+    setMenuOpenFriendId(null);
     try {
       await deleteFriendship(friendId);
       await refetch();
@@ -88,6 +130,34 @@ export default function FriendsScreen() {
       setActionError(error instanceof Error ? error.message : "Failed to remove friend.");
     }
   }
+
+  function handleShowMenu(friendId: string) {
+    setMenuOpenFriendId(friendId);
+  }
+
+  function handleCloseMenu() {
+    setMenuOpenFriendId(null);
+  }
+
+  function handleNudge(friendName: string) {
+    Alert.alert("Nudge", "Nudge feature in development");
+  }
+
+  // Split friends into responded and waiting
+  const { respondedFriends, waitingFriends } = useMemo(() => {
+    const responded: typeof friends = [];
+    const waiting: typeof friends = [];
+
+    friends.forEach((friend) => {
+      if (respondedFriendIds.has(friend.id)) {
+        responded.push(friend);
+      } else {
+        waiting.push(friend);
+      }
+    });
+
+    return { respondedFriends: responded, waitingFriends: waiting };
+  }, [friends, respondedFriendIds]);
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
@@ -138,29 +208,148 @@ export default function FriendsScreen() {
         <View className="mt-8 gap-3">
           <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Your friends ({friends.length})</Text>
 
-          {isLoading ? (
+          {isLoading || isCheckingResponses ? (
             <View className="py-6">
               <ActivityIndicator />
             </View>
           ) : friends.length === 0 ? (
             <Text className="font-mono text-sm text-muted-foreground">No friends yet.</Text>
           ) : (
-            friends.map((f) => (
-              <View key={f.id} className="flex-row items-center justify-between rounded-2xl border border-muted bg-card px-4 py-3">
-                <View className="flex-1">
-                  <Text className="font-body text-base text-foreground">{f.first_name ?? f.username ?? "Friend"}</Text>
-                  {!!f.username ? <Text className="font-mono text-xs text-muted-foreground">@{f.username}</Text> : null}
+            <>
+              {/* Waiting section */}
+              {waitingFriends.length > 0 ? (
+                <View className="gap-3">
+                  <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Waiting ({waitingFriends.length})
+                  </Text>
+                  {waitingFriends.map((f) => (
+                    <FriendCard
+                      key={f.id}
+                      friend={f}
+                      onPress={() => router.push(`/friend/${f.id}`)}
+                      onMenuPress={() => handleShowMenu(f.id)}
+                      onNudge={() => handleNudge(f.first_name ?? f.username ?? "Friend")}
+                      showNudge={true}
+                      menuOpen={menuOpenFriendId === f.id}
+                      onCloseMenu={handleCloseMenu}
+                      onDelete={() => void handleDeleteFriend(f.id)}
+                    />
+                  ))}
                 </View>
+              ) : null}
 
-                <Pressable onPress={() => void handleDeleteFriend(f.id)} accessibilityRole="button" className="px-2 py-2">
-                  <Text className="font-mono text-xs text-muted-foreground">Remove</Text>
-                </Pressable>
-              </View>
-            ))
+              {/* Responded section */}
+              {respondedFriends.length > 0 ? (
+                <View className="gap-3">
+                  <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Responded ({respondedFriends.length})
+                  </Text>
+                  {respondedFriends.map((f) => (
+                    <FriendCard
+                      key={f.id}
+                      friend={f}
+                      onPress={() => router.push(`/friend/${f.id}`)}
+                      onMenuPress={() => handleShowMenu(f.id)}
+                      onNudge={() => handleNudge(f.first_name ?? f.username ?? "Friend")}
+                      showNudge={false}
+                      menuOpen={menuOpenFriendId === f.id}
+                      onCloseMenu={handleCloseMenu}
+                      onDelete={() => void handleDeleteFriend(f.id)}
+                    />
+                  ))}
+                </View>
+              ) : null}
+            </>
           )}
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+interface FriendCardProps {
+  friend: { id: string; username: string | null; first_name: string | null };
+  onPress: () => void;
+  onMenuPress: () => void;
+  onNudge: () => void;
+  showNudge: boolean;
+  menuOpen: boolean;
+  onCloseMenu: () => void;
+  onDelete: () => void;
+}
+
+function FriendCard({ friend, onPress, onMenuPress, onNudge, showNudge, menuOpen, onCloseMenu, onDelete }: FriendCardProps) {
+  function handleMenuPress() {
+    if (menuOpen) {
+      onCloseMenu();
+    } else {
+      onMenuPress();
+    }
+  }
+
+  function handleDeletePress() {
+    Alert.alert("Remove Friend", `Are you sure you want to remove ${friend.first_name ?? friend.username ?? "this friend"}?`, [
+      { text: "Cancel", style: "cancel", onPress: onCloseMenu },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          onDelete();
+        },
+      },
+    ]);
+  }
+
+  return (
+    <View className="rounded-2xl border border-muted bg-card">
+      <Pressable onPress={onPress} className="flex-row items-center justify-between px-4 py-3" accessibilityRole="button">
+        <View className="flex-1">
+          <Text className="font-body text-base text-foreground">{friend.first_name ?? friend.username ?? "Friend"}</Text>
+          {!!friend.username ? <Text className="font-mono text-xs text-muted-foreground">@{friend.username}</Text> : null}
+        </View>
+
+        <View className="flex-row items-center gap-2">
+          {showNudge ? (
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                onNudge();
+              }}
+              accessibilityRole="button"
+              className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5"
+            >
+              <Text className="font-mono text-xs text-primary">Nudge</Text>
+            </Pressable>
+          ) : null}
+
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              handleMenuPress();
+            }}
+            accessibilityRole="button"
+            className="px-2 py-2"
+          >
+            <Text className="font-mono text-lg text-muted-foreground">⋮</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+
+      {menuOpen ? (
+        <View className="border-t border-muted px-4 py-2">
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              handleDeletePress();
+            }}
+            accessibilityRole="button"
+            className="py-2"
+          >
+            <Text className="font-mono text-xs text-destructive">Remove Friend</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
   );
 }
 

@@ -1,18 +1,19 @@
-import React, { useState } from "react";
+import { useComments, type Comment } from "@/hooks/useComments";
+import { useProfile } from "@/hooks/useProfile";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/providers/auth-provider";
+import { Trash2 } from "lucide-react-native";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Image,
   Platform,
   Pressable,
   Text,
   TextInput,
-  View,
+  View
 } from "react-native";
-import { Trash2 } from "lucide-react-native";
-import { useComments, type Comment } from "@/hooks/useComments";
-import { useAuth } from "@/providers/auth-provider";
 
 interface CommentSectionProps {
   postId: string;
@@ -128,8 +129,48 @@ function CommentItem({
 
 export function CommentSection({ postId }: CommentSectionProps) {
   const { user } = useAuth();
+  const { profile } = useProfile();
   const { comments, isLoading, addComment, deleteComment, isAdding, canDelete } = useComments(postId);
   const [commentText, setCommentText] = useState("");
+  const [signedAvatarUrl, setSignedAvatarUrl] = useState<string | null>(null);
+
+  const avatarFallback = useMemo(() => {
+    const label = profile?.first_name || profile?.username || "";
+    return (label.slice(0, 2).toUpperCase() || "?").trim();
+  }, [profile?.first_name, profile?.username]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function signAvatarUrl() {
+      const path = profile?.avatar_url;
+      if (!path) {
+        setSignedAvatarUrl(null);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase.storage.from("profile-pictures").createSignedUrl(path, 24 * 60 * 60);
+
+        if (cancelled) return;
+        if (error || !data?.signedUrl) {
+          if (__DEV__) console.warn("[CommentSection] createSignedUrl failed", error);
+          setSignedAvatarUrl(null);
+          return;
+        }
+
+        setSignedAvatarUrl(data.signedUrl);
+      } catch (e) {
+        if (__DEV__) console.warn("[CommentSection] signAvatarUrl error", e);
+        if (!cancelled) setSignedAvatarUrl(null);
+      }
+    }
+
+    void signAvatarUrl();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.avatar_url]);
 
   async function handleSubmit() {
     if (!commentText.trim() || isAdding) return;
@@ -148,6 +189,11 @@ export function CommentSection({ postId }: CommentSectionProps) {
 
   return (
     <View>
+      {/* Comments Header */}
+      <View className="mb-4">
+        <Text className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Comments</Text>
+      </View>
+
       {/* Comments List */}
       {isLoading ? (
         <View className="py-8 items-center">
@@ -175,22 +221,37 @@ export function CommentSection({ postId }: CommentSectionProps) {
       {/* Comment Input */}
       {user ? (
         <View className="mt-6 border-t border-muted bg-card px-4 py-3">
-          <View className="flex-row items-end gap-3">
-            <View className="flex-1 rounded-xl border border-muted bg-background px-4 py-3">
+          <View className="flex-row items-center gap-3">
+            <View className="h-10 w-10 overflow-hidden rounded-full bg-secondary">
+              {signedAvatarUrl ? (
+                <Image
+                  source={{ uri: signedAvatarUrl }}
+                  className="h-full w-full"
+                  resizeMode="cover"
+                  accessibilityLabel="Your profile picture"
+                />
+              ) : (
+                <View className="h-full w-full items-center justify-center">
+                  <Text className="font-mono text-[10px] text-muted-foreground">{avatarFallback}</Text>
+                </View>
+              )}
+            </View>
+            <View className="flex-1 rounded-xl border border-muted bg-background px-4 h-12 justify-center">
               <TextInput
                 value={commentText}
                 onChangeText={setCommentText}
                 placeholder="Add a comment..."
                 placeholderTextColor="hsl(0 0% 55%)"
-                multiline
+                multiline={false}
                 maxLength={500}
                 style={{
                   fontFamily: "SpaceMono",
                   fontSize: 14,
                   lineHeight: 20,
                   color: "hsl(60 9% 98%)",
-                  minHeight: 40,
-                  maxHeight: 100,
+                  textAlignVertical: "center",
+                  paddingVertical: 0,
+                  includeFontPadding: false,
                 }}
                 editable={!isAdding}
               />
@@ -201,7 +262,7 @@ export function CommentSection({ postId }: CommentSectionProps) {
               accessibilityRole="button"
               accessibilityLabel="Post comment"
               className={[
-                "rounded-xl px-4 py-3",
+                "rounded-xl px-4 py-3 h-12 items-center justify-center",
                 commentText.trim() && !isAdding ? "bg-primary" : "bg-muted",
               ].join(" ")}
             >

@@ -1,6 +1,7 @@
 import * as ImagePicker from "expo-image-picker";
 import { ArrowLeft, Trash2 } from "lucide-react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { router, useNavigation } from "expo-router";
 import {
   ActivityIndicator,
   Animated,
@@ -19,6 +20,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { YimPost, type BackgroundType, type FontColor, type FontSize, type FontStyle, type Post } from "@/components/posts/yim-post";
 import { FormattedText } from "@/components/prompts/formatted-text";
+import { PostResponseRating } from "@/components/prompts/post-response-rating";
 import { didRespondQueryKey, useDailyPrompt } from "@/hooks/useDailyPrompt";
 import { createYimPost } from "@/hooks/useYimFeed";
 import { deletePostDraft, getPostDraft, setPostDraft } from "@/lib/post-draft";
@@ -132,6 +134,7 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
   const dailyPrompt = useDailyPrompt();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
 
   const [step, setStep] = useState<Step>("content");
   const [quote, setQuote] = useState("");
@@ -146,6 +149,13 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingPrompt, setRatingPrompt] = useState<{ id: string; prompt_text: string; prompt_date: string } | null>(null);
+
+  function handleNavBack() {
+    // Always return to feed and re-open the prompt popup so user lands on the question.
+    router.replace({ pathname: "/(tabs)", params: { showPrompt: "1" } });
+  }
 
   const isValid = useMemo(() => getIsValidQuote(quote), [quote]);
   const [isDraftLoaded, setIsDraftLoaded] = useState(false);
@@ -349,11 +359,32 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
       <ScrollView 
         ref={contentScrollRef}
         className="flex-1" 
-        contentContainerClassName="px-4 pt-8 pb-24" 
+        contentContainerClassName="px-4 pb-24" 
         pointerEvents={params?.pointerEvents}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        style={{ paddingTop: insets.top + 16 }}
       >
         <View className="flex-1 gap-6">
+          {/* Header with back button */}
+          <View className="flex-row items-center">
+            <Pressable
+              onPress={handleNavBack}
+              className="h-11 w-11 items-center justify-center"
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+            >
+              <ArrowLeft color="hsl(60 9% 98%)" size={22} />
+            </Pressable>
+
+            <View className="flex-1 items-center">
+              <Text className="text-center font-display text-4xl text-foreground">Respond</Text>
+            </View>
+
+            {/* spacer to balance layout */}
+            <View style={{ width: 44 }} />
+          </View>
+
           {promptText ? (
             <View className="gap-3">
               <Text className="font-mono text-sm uppercase tracking-wider text-primary">Today's PONDER</Text>
@@ -520,6 +551,18 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
       await queryClient.invalidateQueries({ queryKey: ["dailyPrompt"] });
 
       onPosted?.(created);
+
+      // Show rating modal after successful post
+      const promptDateForRating =
+        promptDate ?? dailyPrompt.prompt?.prompt_date ?? dailyPrompt.cycleDateKey ?? "";
+      const promptTextForRating =
+        promptText ?? dailyPrompt.prompt?.prompt_text ?? "Today's PONDER";
+      setRatingPrompt({
+        id: promptId ?? created.promptId ?? created.id,
+        prompt_text: promptTextForRating,
+        prompt_date: promptDateForRating,
+      });
+      setShowRatingModal(true);
     } catch (error) {
       console.error("[create-post] submit failed", error);
       const code = (error as any)?.code;
@@ -538,12 +581,13 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
   // Don't wait for draft to load - render immediately with default content
   // The draft will be applied once loaded
   return (
+    <>
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-background">
       <View className="flex-1 bg-background" style={{ overflow: "hidden" }}>
         {/* Content step - always rendered when on content or transitioning to style */}
         {(step === "content" || isTransitioningToStyle) && (
           <View className="absolute inset-0 bg-background">
-            {renderContentBody()}
+              {renderContentBody()}
 
             {/* Bottom action bar (Content step only) */}
             {step === "content" && (
@@ -643,21 +687,21 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
             }).panHandlers}
           >
             {/* Top bar (Style step) */}
-            <View className="px-4 pt-6 pb-4">
+            <View className="px-4 pb-4" style={{ paddingTop: insets.top + 10 }}>
               <View className="flex-row items-center">
                 <Pressable
-                  onPress={() => {
-                    // Immediately change step to hide style screen
-                    setStep("content");
-                    // Animate back to content with swipe right
-                    Animated.parallel([
-                      Animated.timing(swipeX, { toValue: screenWidth, duration: 300, useNativeDriver: true }),
-                      Animated.timing(styleSlideX, { toValue: screenWidth, duration: 300, useNativeDriver: true }),
-                    ]).start(() => {
-                      swipeX.setValue(0);
-                      styleSlideX.setValue(0);
-                    });
-                  }}
+                    onPress={() => {
+                      // Immediately change step to hide style screen
+                      setStep("content");
+                      // Animate back to content with swipe right
+                      Animated.parallel([
+                        Animated.timing(swipeX, { toValue: screenWidth, duration: 300, useNativeDriver: true }),
+                        Animated.timing(styleSlideX, { toValue: screenWidth, duration: 300, useNativeDriver: true }),
+                      ]).start(() => {
+                        swipeX.setValue(0);
+                        styleSlideX.setValue(0);
+                      });
+                    }}
                   className="h-11 w-11 items-center justify-center"
                   accessibilityRole="button"
                   accessibilityLabel="Back"
@@ -680,7 +724,12 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
               </View>
             </View>
 
-            <ScrollView className="flex-1" style={{ flex: 1 }} contentContainerClassName="px-4 pb-28">
+            <ScrollView
+              className="flex-1"
+              style={{ flex: 1 }}
+              contentContainerClassName="px-4 pb-28"
+              keyboardDismissMode="on-drag"
+            >
             <YimPost
               post={previewPost}
               editableQuote
@@ -760,9 +809,24 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
                 <Pressable
                   onPress={() => void handlePickPhoto()}
                   disabled={isBusy}
-                  className="h-12 w-12 items-center justify-center rounded-xl border border-muted bg-card"
+                  className="h-12 w-12 items-center justify-center rounded-xl border border-white bg-card"
+                  style={{ borderStyle: "dotted" }}
                 >
-                  <Text className="font-mono text-xs text-foreground">+</Text>
+                  {/* Larger plus icon for the “Upload your own photo” button */}
+                  <Text
+                    className="font-mono text-foreground"
+                    // Explicit font metrics keep the "+" centered on iOS + Android.
+                    style={{
+                      fontSize: 32,
+                      lineHeight: 32,
+                      includeFontPadding: false,
+                      textAlignVertical: "center" as const,
+                        // Small nudge for consistent optical centering.
+                        transform: [{ translateY: 2 }],
+                    }}
+                  >
+                    +
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -838,6 +902,19 @@ export function CreatePost({ promptId, promptText, promptDate, existingPost, onP
         )}
       </View>
     </KeyboardAvoidingView>
+
+    {ratingPrompt ? (
+      <PostResponseRating
+        isVisible={showRatingModal}
+        prompt={ratingPrompt}
+        onClose={() => {
+          setShowRatingModal(false);
+          // Go back to feed without re-opening the prompt popup after rating
+          router.replace("/(tabs)");
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 

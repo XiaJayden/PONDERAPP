@@ -164,8 +164,13 @@ export function YimPost({
 
   const content = (
     <View
-      style={{ borderRadius, padding: cardPadding }}
-      className="relative aspect-square w-full overflow-hidden"
+      style={{
+        borderRadius,
+        padding: cardPadding,
+        // Inner card should clip backgrounds/content
+        overflow: "hidden",
+      }}
+      className="relative aspect-square w-full"
     >
       {/* Background */}
       {background.kind === "gradient" ? (
@@ -307,11 +312,28 @@ export function YimPost({
     </View>
   );
 
-  if (!onPress) return content;
+  const card = (
+    <View
+      style={{
+        borderRadius,
+        // Outer glow lives on this wrapper (no clipping)
+        shadowColor: "rgba(255,255,255,0.9)",
+        shadowOpacity: 0.7,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 10,
+      }}
+      className="w-full"
+    >
+      {content}
+    </View>
+  );
+
+  if (!onPress) return card;
 
   return (
     <Pressable onPress={onPress} className="w-full" accessibilityRole="button">
-      {content}
+      {card}
     </Pressable>
   );
 }

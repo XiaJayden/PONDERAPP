@@ -109,6 +109,7 @@ function RootLayoutNav() {
                   <Stack.Screen name="auth/callback" options={{ headerShown: false }} />
                   <Stack.Screen name="activity" options={{ headerShown: false, animation: "slide_from_right" }} />
                   <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+                  <Stack.Screen name="friend/[id]" options={{ headerShown: false, animation: "slide_from_right" }} />
                 </Stack>
               </PreloadLoadingGate>
               {__DEV__ ? <DevToolsPanel /> : null}
